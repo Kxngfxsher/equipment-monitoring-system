@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: equipment-monitoring
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - uploads-data:/app/backend/uploads
+      - db-data:/app/backend
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - JWT_SECRET=change-this-secret-in-production
+    restart: unless-stopped
+    networks:
+      - monitoring-network
+
+volumes:
+  uploads-data:
+  db-data:
+
+networks:
+  monitoring-network:
+    driver: bridge
