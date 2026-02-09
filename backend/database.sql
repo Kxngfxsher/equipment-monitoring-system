@@ -1,4 +1,4 @@
--- Схема базы данных для системы контроля оборудования
+-- Схема базы данных для системы контроля оборудования v1.1
 
 -- Таблица пользователей
 CREATE TABLE IF NOT EXISTS users (
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS equipment (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Таблица отчётов (связанных со сменами)
+-- Таблица отчётов (связанных со сменами) v1.1 - добавлены фото
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     shift_id INTEGER NOT NULL,
@@ -50,8 +50,10 @@ CREATE TABLE IF NOT EXISTS reports (
     status TEXT NOT NULL CHECK(status IN ('working', 'faulty', 'maintenance')),
     description TEXT,
     audio_file TEXT,  -- путь к аудио файлу
+    photo_files TEXT, -- JSON массив путей к фото файлам
     priority TEXT DEFAULT 'normal' CHECK(priority IN ('low', 'normal', 'high', 'critical')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
