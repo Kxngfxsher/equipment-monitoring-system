@@ -20,8 +20,11 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="#"><i class="bi bi-gear-fill"></i> Система контроля v1.1</a>
-            <div class="ms-auto d-flex align-items-center">
-                <span class="navbar-text text-white me-3" id="userInfo"></span>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <button class="btn btn-outline-light btn-sm admin-only" id="manageEquipmentBtn" style="display: none;">
+                    <i class="bi bi-tools"></i> Оборудование
+                </button>
+                <span class="navbar-text text-white" id="userInfo"></span>
                 <button class="btn btn-outline-light btn-sm" id="logoutBtn"><i class="bi bi-box-arrow-right"></i> Выход</button>
             </div>
         </div>
@@ -131,6 +134,62 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
                     <button type="button" class="btn btn-primary" id="saveShiftBtn">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно управления оборудованием -->
+    <div class="modal fade" id="equipmentModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="bi bi-tools"></i> Управление оборудованием</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <button class="btn btn-primary mb-3" id="addEquipmentBtn"><i class="bi bi-plus-circle"></i> Добавить оборудование</button>
+                    <div id="equipmentList" class="table-responsive"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления оборудования -->
+    <div class="modal fade" id="addEquipmentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Добавить оборудование</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="equipmentForm">
+                        <div class="mb-3">
+                            <label class="form-label">ID оборудования</label>
+                            <input type="text" class="form-control" id="equipmentId" placeholder="EQ-001" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Название</label>
+                            <input type="text" class="form-control" id="equipmentName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Тип</label>
+                            <input type="text" class="form-control" id="equipmentType">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Расположение</label>
+                            <input type="text" class="form-control" id="equipmentLocation">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Описание</label>
+                            <textarea class="form-control" id="equipmentDescription" rows="3"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="saveEquipmentBtn">Сохранить</button>
                 </div>
             </div>
         </div>
