@@ -14,7 +14,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-producti
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Create uploads directories
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -24,11 +23,22 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
 if (!fs.existsSync(tasksDir)) fs.mkdirSync(tasksDir, { recursive: true });
 
-// Статическая папка для фото (ИСПРАВЛЕНИЕ #1)
-app.use('/api/photos', express.static(photosDir));
-app.use('/api/audio', express.static(uploadsDir));
+// Статические папки для медиа-файлов (ИСПРАВЛЕНО - без аутентификации)
+app.use('/api/photos', express.static(photosDir, {
+  setHeaders: (res, filePath) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+  }
+}));
+app.use('/api/audio', express.static(uploadsDir, {
+  setHeaders: (res, filePath) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+  }
+}));
 
-// Multer for audio files
+// Frontend static files
+app.use(express.static(path.join(__dirname, '../frontend')));
+
+// Multer configurations
 const audioStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
@@ -37,7 +47,6 @@ const audioStorage = multer.diskStorage({
   }
 });
 
-// Multer for photo files
 const photoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, photosDir),
   filename: (req, file, cb) => {
@@ -46,7 +55,6 @@ const photoStorage = multer.diskStorage({
   }
 });
 
-// Multer for task files
 const taskStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, tasksDir),
   filename: (req, file, cb) => {
@@ -59,7 +67,6 @@ const audioUpload = multer({ storage: audioStorage, limits: { fileSize: 10 * 102
 const photoUpload = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 } });
 const taskUpload = multer({ storage: taskStorage, limits: { fileSize: 50 * 1024 * 1024 } });
 
-// Combined upload for reports (audio + photos)
 const reportUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -166,9 +173,9 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
   });
 });
 
-// ===== USERS (UPDATED #4) =====
-app.get('/api/users', authenticateToken, isAdmin, (req, res) => {
-  db.all('SELECT id, username, role, first_name, last_name, full_name, email, description, created_at FROM users', [], (err, rows) => {
+// ===== USERS =====
+app.get('/api/users', authenticateToken, (req, res) => {
+  db.all('SELECT id, username, role, first_name, last_name, full_name, email, description, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
@@ -176,12 +183,18 @@ app.get('/api/users', authenticateToken, isAdmin, (req, res) => {
 
 app.post('/api/users', authenticateToken, isAdmin, (req, res) => {
   const { username, password, role, first_name, last_name, email, description } = req.body;
+  if (!username || !password || !role) return res.status(400).json({ error: 'Username, password and role are required' });
+  
   const full_name = `${first_name || ''} ${last_name || ''}`.trim();
   const hashedPassword = bcrypt.hashSync(password, 10);
+  
   db.run('INSERT INTO users (username, password, role, first_name, last_name, full_name, email, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [username, hashedPassword, role, first_name, last_name, full_name, email, description],
     function(err) {
-      if (err) return res.status(500).json({ error: 'Failed to create user' });
+      if (err) {
+        if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Username already exists' });
+        return res.status(500).json({ error: 'Failed to create user' });
+      }
       res.json({ id: this.lastID, message: 'User created successfully' });
     });
 });
@@ -239,7 +252,7 @@ app.delete('/api/equipment/:id', authenticateToken, isAdmin, (req, res) => {
   });
 });
 
-// ===== SHIFTS (UPDATED #3 - админ может удалять) =====
+// ===== SHIFTS =====
 app.get('/api/shifts', authenticateToken, (req, res) => {
   let query = req.user.role === 'admin'
     ? `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, 
@@ -275,26 +288,25 @@ app.post('/api/shifts', authenticateToken, isAdmin, (req, res) => {
 });
 
 app.delete('/api/shifts/:id', authenticateToken, isAdmin, (req, res) => {
-  // Сначала получаем все отчеты для удаления файлов
   db.all('SELECT audio_file, photo_files FROM reports WHERE shift_id = ?', [req.params.id], (err, reports) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     
-    // Удаляем смену (отчеты удалятся автоматически по CASCADE)
     db.run('DELETE FROM shifts WHERE id = ?', [req.params.id], function(err) {
       if (err) return res.status(500).json({ error: 'Failed to delete shift' });
       
-      // Удаляем физические файлы
       reports.forEach(report => {
         if (report.audio_file) {
           const audioPath = path.join(uploadsDir, report.audio_file);
           if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
         }
         if (report.photo_files) {
-          const photos = JSON.parse(report.photo_files);
-          photos.forEach(photo => {
-            const photoPath = path.join(photosDir, photo);
-            if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
-          });
+          try {
+            const photos = JSON.parse(report.photo_files);
+            photos.forEach(photo => {
+              const photoPath = path.join(photosDir, photo);
+              if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
+            });
+          } catch (e) { console.error('Error deleting photos:', e); }
         }
       });
       
@@ -303,9 +315,7 @@ app.delete('/api/shifts/:id', authenticateToken, isAdmin, (req, res) => {
   });
 });
 
-// ===== REPORTS v1.1 =====
-
-// Get report by shift_id
+// ===== REPORTS =====
 app.get('/api/shifts/:id/report', authenticateToken, (req, res) => {
   db.get(`SELECT r.*, u.username, u.first_name, u.last_name, u.full_name,
           e.name as equipment_name, e.type as equipment_type, e.location as equipment_location
@@ -314,22 +324,25 @@ app.get('/api/shifts/:id/report', authenticateToken, (req, res) => {
           WHERE r.shift_id = ?`, [req.params.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (!row) return res.status(404).json({ error: 'Report not found' });
-    if (row.photo_files) row.photo_files = JSON.parse(row.photo_files);
+    if (row.photo_files) {
+      try {
+        row.photo_files = JSON.parse(row.photo_files);
+      } catch (e) {
+        row.photo_files = [];
+      }
+    }
     res.json(row);
   });
 });
 
-// Create report with media (audio + photos)
 app.post('/api/reports/media', authenticateToken, reportUpload, (req, res) => {
   const { shift_id, equipment_id, status, description, priority } = req.body;
   if (!shift_id) return res.status(400).json({ error: 'shift_id is required' });
 
-  // Check if report already exists for this shift
   db.get('SELECT id FROM reports WHERE shift_id = ?', [shift_id], (err, existing) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (existing) return res.status(400).json({ error: 'Report already exists for this shift' });
 
-    // Check if user owns this shift or is admin
     db.get('SELECT user_id FROM shifts WHERE id = ?', [shift_id], (err, shift) => {
       if (err) return res.status(500).json({ error: 'Database error' });
       if (!shift) return res.status(404).json({ error: 'Shift not found' });
@@ -351,7 +364,6 @@ app.post('/api/reports/media', authenticateToken, reportUpload, (req, res) => {
   });
 });
 
-// Update report (admin only)
 app.put('/api/reports/:id', authenticateToken, isAdmin, (req, res) => {
   const { equipment_id, status, description, priority } = req.body;
   db.run('UPDATE reports SET equipment_id = ?, status = ?, description = ?, priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -362,7 +374,6 @@ app.put('/api/reports/:id', authenticateToken, isAdmin, (req, res) => {
     });
 });
 
-// Delete report (admin only)
 app.delete('/api/reports/:id', authenticateToken, isAdmin, (req, res) => {
   db.get('SELECT audio_file, photo_files FROM reports WHERE id = ?', [req.params.id], (err, report) => {
     if (err || !report) return res.status(404).json({ error: 'Report not found' });
@@ -370,91 +381,33 @@ app.delete('/api/reports/:id', authenticateToken, isAdmin, (req, res) => {
     db.run('DELETE FROM reports WHERE id = ?', [req.params.id], function(err) {
       if (err) return res.status(500).json({ error: 'Failed to delete report' });
       
-      // Delete physical files
       if (report.audio_file) {
         const audioPath = path.join(uploadsDir, report.audio_file);
         if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
       }
       if (report.photo_files) {
-        const photos = JSON.parse(report.photo_files);
-        photos.forEach(photo => {
-          const photoPath = path.join(photosDir, photo);
-          if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
-        });
+        try {
+          const photos = JSON.parse(report.photo_files);
+          photos.forEach(photo => {
+            const photoPath = path.join(photosDir, photo);
+            if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
+          });
+        } catch (e) { console.error('Error deleting photos:', e); }
       }
       res.json({ message: 'Report deleted successfully' });
     });
   });
 });
 
-// Get audio file
-app.get('/api/audio/:filename', authenticateToken, (req, res) => {
-  const filePath = path.join(uploadsDir, req.params.filename);
-  if (fs.existsSync(filePath)) res.sendFile(filePath);
-  else res.status(404).json({ error: 'Audio file not found' });
-});
-
-// Get photo file
-app.get('/api/photos/:filename', authenticateToken, (req, res) => {
-  const filePath = path.join(photosDir, req.params.filename);
-  if (fs.existsSync(filePath)) res.sendFile(filePath);
-  else res.status(404).json({ error: 'Photo not found' });
-});
-
-// ===== TASKS =====
-app.get('/api/shifts/:id/tasks', authenticateToken, (req, res) => {
-  db.all(`SELECT t.*, u.username as creator_name FROM shift_tasks t 
-          JOIN users u ON t.created_by = u.id WHERE t.shift_id = ? ORDER BY t.created_at DESC`,
-    [req.params.id], (err, rows) => {
-      if (err) return res.status(500).json({ error: 'Database error' });
-      res.json(rows);
-    });
-});
-
-app.post('/api/shifts/:id/tasks', authenticateToken, isAdmin, (req, res) => {
-  const { title, description, priority } = req.body;
-  db.run('INSERT INTO shift_tasks (shift_id, title, description, priority, created_by) VALUES (?, ?, ?, ?, ?)',
-    [req.params.id, title, description, priority || 'normal', req.user.id],
-    function(err) {
-      if (err) return res.status(500).json({ error: 'Failed to create task' });
-      res.json({ id: this.lastID, message: 'Task created successfully' });
-    });
-});
-
-// ===== TASK FILES =====
-app.get('/api/tasks/:id/files', authenticateToken, (req, res) => {
-  db.all(`SELECT f.*, u.username as uploader_name FROM task_files f 
-          JOIN users u ON f.uploaded_by = u.id WHERE f.task_id = ? ORDER BY f.created_at DESC`,
-    [req.params.id], (err, rows) => {
-      if (err) return res.status(500).json({ error: 'Database error' });
-      res.json(rows);
-    });
-});
-
-app.post('/api/tasks/:id/files', authenticateToken, taskUpload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  db.run('INSERT INTO task_files (task_id, file_name, file_path, file_type, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)',
-    [req.params.id, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size, req.user.id],
-    function(err) {
-      if (err) return res.status(500).json({ error: 'Failed to save file' });
-      res.json({ id: this.lastID, message: 'File uploaded successfully', file: { name: req.file.originalname, size: req.file.size, type: req.file.mimetype } });
-    });
-});
-
-app.get('/api/files/:filename', authenticateToken, (req, res) => {
-  const filePath = path.join(tasksDir, req.params.filename);
-  db.get('SELECT * FROM task_files WHERE file_path = ?', [req.params.filename], (err, file) => {
-    if (err || !file) return res.status(404).json({ error: 'File not found' });
-    if (fs.existsSync(filePath)) res.download(filePath, file.file_name);
-    else res.status(404).json({ error: 'File not found on server' });
-  });
-});
-
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../frontend/login.html')));
 
 app.listen(PORT, () => {
-  console.log(`Server v1.1.2 is running on http://localhost:${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`\n===========================================`);
+  console.log(`  Server v1.1.2 is running`);
+  console.log(`  http://localhost:${PORT}`);
+  console.log(`  Photos: /api/photos/*`);
+  console.log(`  Audio: /api/audio/*`);
+  console.log(`===========================================\n`);
 });
 
 process.on('SIGINT', () => {
