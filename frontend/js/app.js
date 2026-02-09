@@ -119,6 +119,14 @@ function displayShiftDetails(shift, report, hasReport) {
         ${shift.description ? `<div class="mb-3"><h6><i class="bi bi-info-circle"></i> Описание:</h6><p>${shift.description}</p></div>` : ''}
     `;
     
+    // Кнопка удаления смены для админа (#3)
+    const footer = document.getElementById('shiftModalFooter');
+    if (currentUser.role === 'admin') {
+        footer.innerHTML = `<button class="btn btn-danger" onclick="deleteShift(${shift.id})"><i class="bi bi-trash"></i> Удалить смену</button>`;
+    } else {
+        footer.innerHTML = '';
+    }
+    
     const reportSection = document.getElementById('reportSection');
     if (hasReport) {
         displayReport(report);
@@ -162,7 +170,7 @@ function displayReport(report) {
                 <h6><i class="bi bi-image-fill"></i> Фотографии (${report.photo_files.length}):</h6>
                 <div class="photo-gallery">
                     ${report.photo_files.map(photo => 
-                        `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')" onerror="this.style.display='none';console.error('Failed to load photo: ${photo}')">`
+                        `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')" onerror="this.style.display='none';console.error('Failed to load: ${photo}')">`
                     ).join('')}
                 </div>
             </div>
@@ -243,6 +251,23 @@ async function deleteReport(reportId) {
         await loadShifts();
     } catch (error) {
         alert('Ошибка удаления');
+    }
+}
+
+// #3 - Удаление смены (только админ)
+async function deleteShift(shiftId) {
+    if (!confirm('Удалить смену? Все отчеты и файлы будут удалены.')) return;
+    
+    try {
+        await fetch(`${API_URL}/api/shifts/${shiftId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        alert('Смена удалена');
+        bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
+        await loadShifts();
+    } catch (error) {
+        alert('Ошибка удаления смены');
     }
 }
 
@@ -376,6 +401,7 @@ async function deleteEquipment(equipmentId) {
     }
 }
 
+// #4 - Управление пользователями
 let users = [];
 async function loadUsers() {
     try {
@@ -391,46 +417,152 @@ async function loadUsers() {
     }
 }
 
-// Shift schedule helpers
-function toggleScheduleType() {
-    const fixedSchedule = document.getElementById('fixedSchedule').checked;
-    const scheduleButtons = document.getElementById('scheduleButtons');
-    const manualFields = document.getElementById('manualTimeFields');
+async function openUsersModal() {
+    await loadUsers();
+    displayUsersList();
+    new bootstrap.Modal(document.getElementById('usersModal')).show();
+}
+
+function displayUsersList() {
+    const container = document.getElementById('usersList');
+    if (users.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Пользователей нет</div>';
+        return;
+    }
     
-    if (fixedSchedule) {
-        scheduleButtons.style.display = 'block';
-        manualFields.style.display = 'none';
-    } else {
-        scheduleButtons.style.display = 'none';
-        manualFields.style.display = 'block';
+    container.innerHTML = `
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Логин</th>
+                    <th>Имя</th>
+                    <th>Роль</th>
+                    <th>Email</th>
+                    <th>Описание</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${users.map(user => {
+                    const roleBadge = user.role === 'admin' ? 'danger' : 'primary';
+                    const roleText = user.role === 'admin' ? 'Админ' : 'Инженер';
+                    const canDelete = user.id !== currentUser.id;
+                    return `
+                        <tr>
+                            <td>${user.username}</td>
+                            <td>${user.full_name || '-'}</td>
+                            <td><span class="badge bg-${roleBadge}">${roleText}</span></td>
+                            <td>${user.email || '-'}</td>
+                            <td>${user.description || '-'}</td>
+                            <td>
+                                ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id})"><i class="bi bi-trash"></i></button>` : '<span class="text-muted">Текущий</span>'}
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function openAddUser() {
+    document.getElementById('userForm').reset();
+    new bootstrap.Modal(document.getElementById('addUserModal')).show();
+}
+
+async function saveUser() {
+    const username = document.getElementById('userUsername').value;
+    const password = document.getElementById('userPassword').value;
+    const role = document.getElementById('userRole').value;
+    const firstName = document.getElementById('userFirstName').value;
+    const lastName = document.getElementById('userLastName').value;
+    const email = document.getElementById('userEmail').value;
+    const description = document.getElementById('userDescription').value;
+    
+    if (!username || !password) {
+        alert('Заполните логин и пароль');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_URL}/api/users`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username,
+                password,
+                role,
+                first_name: firstName,
+                last_name: lastName,
+                email,
+                description
+            })
+        });
+        
+        if (!res.ok) throw new Error('Ошибка создания пользователя');
+        
+        alert('Пользователь создан!');
+        bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
+        await loadUsers();
+        displayUsersList();
+    } catch (error) {
+        alert(`Ошибка: ${error.message}`);
     }
 }
 
+async function deleteUser(userId) {
+    if (!confirm('Удалить пользователя? Все его смены и отчеты будут удалены.')) return;
+    
+    try {
+        await fetch(`${API_URL}/api/users/${userId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        alert('Пользователь удален');
+        await loadUsers();
+        displayUsersList();
+    } catch (error) {
+        alert('Ошибка удаления пользователя');
+    }
+}
+
+// #2 - Свободный график + фиксированные графики
 function setSchedule(type) {
     const dateInput = document.getElementById('shiftDate').value;
-    if (!dateInput) {
+    if (!dateInput && type !== 'custom') {
         alert('Сначала выберите дату');
         return;
     }
     
+    const timeFields = document.getElementById('timeFieldsContainer');
+    
+    if (type === 'custom') {
+        // Свободный график - показываем поля
+        timeFields.style.display = 'block';
+        document.querySelectorAll('.schedule-btn').forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+        return;
+    }
+    
+    // Фиксированные графики - заполняем автоматически
     const date = new Date(dateInput);
     let startTime, endTime;
     
     if (type === '5/2') {
-        // 5/2: 08:00 - 17:00
         startTime = new Date(date);
         startTime.setHours(8, 0, 0);
         endTime = new Date(date);
         endTime.setHours(17, 0, 0);
     } else if (type === '2/2') {
-        // 2/2: 10:00 - 22:00 (12 hours)
         startTime = new Date(date);
         startTime.setHours(10, 0, 0);
         endTime = new Date(date);
         endTime.setHours(22, 0, 0);
     }
     
-    // Format to datetime-local input format
     const formatDateTimeLocal = (dt) => {
         const year = dt.getFullYear();
         const month = String(dt.getMonth() + 1).padStart(2, '0');
@@ -443,7 +575,7 @@ function setSchedule(type) {
     document.getElementById('shiftStartTime').value = formatDateTimeLocal(startTime);
     document.getElementById('shiftEndTime').value = formatDateTimeLocal(endTime);
     
-    // Highlight selected button
+    timeFields.style.display = 'block';
     document.querySelectorAll('.schedule-btn').forEach(btn => btn.classList.remove('active'));
     event.target.classList.add('active');
 }
@@ -455,7 +587,7 @@ async function createShift() {
     const description = document.getElementById('shiftDescription').value;
     
     if (!userId || !startTime || !endTime) {
-        alert('Заполните все поля');
+        alert('Заполните все обязательные поля (инженер, время)');
         return;
     }
     
@@ -476,6 +608,7 @@ async function createShift() {
         alert('Смена создана');
         bootstrap.Modal.getInstance(document.getElementById('addShiftModal')).hide();
         document.getElementById('shiftForm').reset();
+        document.getElementById('timeFieldsContainer').style.display = 'none';
         await loadShifts();
     } catch (error) {
         alert('Ошибка создания смены');
@@ -501,6 +634,8 @@ function setupEventListeners() {
     document.getElementById('addEquipmentBtn')?.addEventListener('click', openAddEquipment);
     document.getElementById('saveEquipmentBtn')?.addEventListener('click', saveEquipment);
     
-    // Schedule type toggle
-    document.getElementById('fixedSchedule')?.addEventListener('change', toggleScheduleType);
+    // Users management (#4)
+    document.getElementById('manageUsersBtn')?.addEventListener('click', openUsersModal);
+    document.getElementById('addUserBtn')?.addEventListener('click', openAddUser);
+    document.getElementById('saveUserBtn')?.addEventListener('click', saveUser);
 }
