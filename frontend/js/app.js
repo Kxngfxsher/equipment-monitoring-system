@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:3000';
+// API_URL определяется в config.js
 let token = localStorage.getItem('token');
 let currentUser = null;
 let currentShiftId = null;

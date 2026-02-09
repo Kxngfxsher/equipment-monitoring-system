@@ -1,18 +1,16 @@
-const API_URL = 'http://localhost:3000/api';
+// API_URL определяется в config.js
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
-    const errorDiv = document.getElementById('errorMessage');
+    const errorDiv = document.getElementById('errorMsg');
     
     try {
-        const response = await fetch(`${API_URL}/auth/login`, {
+        const response = await fetch(`${API_URL}/api/auth/login`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         
@@ -24,11 +22,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             window.location.href = 'index.html';
         } else {
             errorDiv.style.display = 'block';
-            errorDiv.querySelector('.alert').textContent = data.error || 'Ошибка авторизации';
+            errorDiv.textContent = data.error || 'Ошибка авторизации';
         }
     } catch (error) {
         errorDiv.style.display = 'block';
-        errorDiv.querySelector('.alert').textContent = 'Ошибка подключения к серверу';
+        errorDiv.textContent = 'Ошибка подключения к серверу';
         console.error('Login error:', error);
     }
 });
