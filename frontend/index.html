@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Система контроля v1.1.1</title>
+    <title>Система контроля v1.1.2</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
@@ -16,14 +16,17 @@
         .photo-gallery img:hover { transform: scale(1.05); }
         .badge-report { position: absolute; top: 10px; right: 10px; }
         .schedule-btn { margin: 5px; }
-        .schedule-btn.active { background-color: #0d6efd !important; color: white !important; }
+        .schedule-btn.active { background-color: #0d6efd !important; color: white !important; border-color: #0d6efd !important; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#"><i class="bi bi-gear-fill"></i> Система контроля v1.1.1</a>
+            <a class="navbar-brand" href="#"><i class="bi bi-gear-fill"></i> Система контроля v1.1.2</a>
             <div class="ms-auto d-flex align-items-center gap-2">
+                <button class="btn btn-outline-light btn-sm admin-only" id="manageUsersBtn" style="display: none;">
+                    <i class="bi bi-people"></i> Пользователи
+                </button>
                 <button class="btn btn-outline-light btn-sm admin-only" id="manageEquipmentBtn" style="display: none;">
                     <i class="bi bi-tools"></i> Оборудование
                 </button>
@@ -53,6 +56,9 @@
                     <div id="shiftDetails"></div>
                     <hr>
                     <div id="reportSection"></div>
+                </div>
+                <div class="modal-footer" id="shiftModalFooter">
+                    <!-- Кнопка удаления смены для админа -->
                 </div>
             </div>
         </div>
@@ -121,24 +127,14 @@
                             <select class="form-control" id="shiftUserId" required></select>
                         </div>
                         
-                        <!-- Фиксированный график -->
-                        <div class="mb-3">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="fixedSchedule" checked>
-                                <label class="form-check-label" for="fixedSchedule">
-                                    <i class="bi bi-calendar-range"></i> Фиксированный график
-                                </label>
-                            </div>
-                        </div>
-
                         <!-- Выбор даты -->
                         <div class="mb-3">
                             <label class="form-label"><i class="bi bi-calendar3"></i> Дата смены</label>
                             <input type="date" class="form-control" id="shiftDate" required>
                         </div>
 
-                        <!-- Кнопки выбора графика -->
-                        <div class="mb-3" id="scheduleButtons">
+                        <!-- Кнопки выбора графика (#2 - добавлена "Свободный график") -->
+                        <div class="mb-3">
                             <label class="form-label"><i class="bi bi-clock-history"></i> Выберите график:</label>
                             <div>
                                 <button type="button" class="btn btn-outline-primary schedule-btn" onclick="setSchedule('5/2')">
@@ -147,28 +143,25 @@
                                 <button type="button" class="btn btn-outline-primary schedule-btn" onclick="setSchedule('2/2')">
                                     <i class="bi bi-clock"></i> 2/2 (10:00-22:00)
                                 </button>
+                                <button type="button" class="btn btn-outline-secondary schedule-btn" onclick="setSchedule('custom')">
+                                    <i class="bi bi-pencil"></i> Свободный
+                                </button>
                             </div>
-                            <small class="text-muted">Нажмите на график, чтобы автоматически заполнить время</small>
+                            <small class="text-muted">Выберите график или укажите своё время</small>
                         </div>
 
-                        <!-- Ручной ввод времени -->
-                        <div id="manualTimeFields" style="display: none;">
-                            <div class="mb-3">
-                                <label class="form-label"><i class="bi bi-clock"></i> Начало смены</label>
-                                <input type="datetime-local" class="form-control" id="shiftStartTime" required>
+                        <!-- Поля времени -->
+                        <div class="mb-3" id="timeFieldsContainer" style="display: none;">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-clock"></i> Начало смены</label>
+                                    <input type="datetime-local" class="form-control" id="shiftStartTime" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label"><i class="bi bi-clock-fill"></i> Конец смены</label>
+                                    <input type="datetime-local" class="form-control" id="shiftEndTime" required>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label"><i class="bi bi-clock-fill"></i> Конец смены</label>
-                                <input type="datetime-local" class="form-control" id="shiftEndTime" required>
-                            </div>
-                        </div>
-
-                        <!-- Отображение выбранного времени -->
-                        <div class="mb-3">
-                            <div class="alert alert-info" style="display: none;" id="timeDisplay"></div>
-                            <!-- Hidden fields for actual submission -->
-                            <input type="datetime-local" id="shiftStartTime" style="display: none;">
-                            <input type="datetime-local" id="shiftEndTime" style="display: none;">
                         </div>
 
                         <div class="mb-3">
@@ -180,6 +173,74 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
                     <button type="button" class="btn btn-primary" id="saveShiftBtn"><i class="bi bi-check-circle"></i> Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно управления пользователями (#4) -->
+    <div class="modal fade" id="usersModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-people"></i> Управление пользователями</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <button class="btn btn-success mb-3" id="addUserBtn"><i class="bi bi-person-plus"></i> Добавить пользователя</button>
+                    <div id="usersList" class="table-responsive"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления пользователя -->
+    <div class="modal fade" id="addUserModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Добавить пользователя</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="userForm">
+                        <div class="mb-3">
+                            <label class="form-label">Логин *</label>
+                            <input type="text" class="form-control" id="userUsername" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Пароль *</label>
+                            <input type="password" class="form-control" id="userPassword" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Роль *</label>
+                            <select class="form-control" id="userRole" required>
+                                <option value="engineer">Инженер</option>
+                                <option value="admin">Администратор</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Имя</label>
+                            <input type="text" class="form-control" id="userFirstName">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Фамилия</label>
+                            <input type="text" class="form-control" id="userLastName">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" id="userEmail">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Описание</label>
+                            <textarea class="form-control" id="userDescription" rows="3"></textarea>
+                            <small class="text-muted">Краткое описание сотрудника</small>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="saveUserBtn">Сохранить</button>
                 </div>
             </div>
         </div>
