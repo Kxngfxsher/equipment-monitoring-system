@@ -11,11 +11,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Create uploads directories
 const uploadsDir = path.join(__dirname, 'uploads');
 const photosDir = path.join(__dirname, 'uploads/photos');
 const tasksDir = path.join(__dirname, 'uploads/tasks');
@@ -23,72 +21,10 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
 if (!fs.existsSync(tasksDir)) fs.mkdirSync(tasksDir, { recursive: true });
 
-// Статические папки для медиа-файлов (ИСПРАВЛЕНО - без аутентификации)
-app.use('/api/photos', express.static(photosDir, {
-  setHeaders: (res, filePath) => {
-    res.set('Cache-Control', 'public, max-age=86400');
-  }
-}));
-app.use('/api/audio', express.static(uploadsDir, {
-  setHeaders: (res, filePath) => {
-    res.set('Cache-Control', 'public, max-age=86400');
-  }
-}));
-
-// Frontend static files
+app.use('/api/photos', express.static(photosDir, { setHeaders: (res) => res.set('Cache-Control', 'public, max-age=86400') }));
+app.use('/api/audio', express.static(uploadsDir, { setHeaders: (res) => res.set('Cache-Control', 'public, max-age=86400') }));
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// Multer configurations
-const audioStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'audio-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const photoStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, photosDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'photo-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const taskStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, tasksDir),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'task-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const audioUpload = multer({ storage: audioStorage, limits: { fileSize: 10 * 1024 * 1024 } });
-const photoUpload = multer({ storage: photoStorage, limits: { fileSize: 5 * 1024 * 1024 } });
-const taskUpload = multer({ storage: taskStorage, limits: { fileSize: 50 * 1024 * 1024 } });
-
-const reportUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      if (file.fieldname === 'audio') cb(null, uploadsDir);
-      else if (file.fieldname === 'photos') cb(null, photosDir);
-      else cb(new Error('Invalid field'));
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const prefix = file.fieldname === 'audio' ? 'audio-' : 'photo-';
-      cb(null, prefix + uniqueSuffix + path.extname(file.originalname));
-    }
-  }),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (file.fieldname === 'audio' && file.mimetype.startsWith('audio/')) cb(null, true);
-    else if (file.fieldname === 'photos' && file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Invalid file type'));
-  }
-}).fields([{ name: 'audio', maxCount: 1 }, { name: 'photos', maxCount: 5 }]);
-
-// Database
 const db = new sqlite3.Database('./equipment_monitoring.db', (err) => {
   if (err) console.error('Error opening database:', err.message);
   else { console.log('Connected to SQLite database.'); initDatabase(); }
@@ -111,24 +47,17 @@ function initDatabase() {
       type TEXT, location TEXT, status TEXT DEFAULT 'working', description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS reports (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
-      equipment_id TEXT, status TEXT NOT NULL, description TEXT, audio_file TEXT, photo_files TEXT,
+      id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER NOT NULL UNIQUE, user_id INTEGER NOT NULL,
       priority TEXT DEFAULT 'normal', created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`);
-    db.run(`CREATE TABLE IF NOT EXISTS shift_tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER NOT NULL, title TEXT NOT NULL,
-      description TEXT, priority TEXT DEFAULT 'normal', status TEXT DEFAULT 'pending', created_by INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE, FOREIGN KEY (created_by) REFERENCES users(id)
-    )`);
-    db.run(`CREATE TABLE IF NOT EXISTS task_files (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, file_name TEXT NOT NULL,
-      file_path TEXT NOT NULL, file_type TEXT, file_size INTEGER, uploaded_by INTEGER NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (task_id) REFERENCES shift_tasks(id) ON DELETE CASCADE, FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    db.run(`CREATE TABLE IF NOT EXISTS equipment_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, equipment_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('working', 'faulty', 'maintenance')),
+      description TEXT, photo_files TEXT, audio_file TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+      FOREIGN KEY (equipment_id) REFERENCES equipment(equipment_id)
     )`);
 
     const hashedPassword = bcrypt.hashSync('admin123', 10);
@@ -155,7 +84,6 @@ function isAdmin(req, res, next) {
   next();
 }
 
-// ===== AUTH =====
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
   db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
@@ -173,7 +101,6 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
   });
 });
 
-// ===== USERS =====
 app.get('/api/users', authenticateToken, (req, res) => {
   db.all('SELECT id, username, role, first_name, last_name, full_name, email, description, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
@@ -184,10 +111,8 @@ app.get('/api/users', authenticateToken, (req, res) => {
 app.post('/api/users', authenticateToken, isAdmin, (req, res) => {
   const { username, password, role, first_name, last_name, email, description } = req.body;
   if (!username || !password || !role) return res.status(400).json({ error: 'Username, password and role are required' });
-  
   const full_name = `${first_name || ''} ${last_name || ''}`.trim();
   const hashedPassword = bcrypt.hashSync(password, 10);
-  
   db.run('INSERT INTO users (username, password, role, first_name, last_name, full_name, email, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [username, hashedPassword, role, first_name, last_name, full_name, email, description],
     function(err) {
@@ -202,7 +127,6 @@ app.post('/api/users', authenticateToken, isAdmin, (req, res) => {
 app.put('/api/users/:id', authenticateToken, isAdmin, (req, res) => {
   const { username, password, role, first_name, last_name, email, description } = req.body;
   const full_name = `${first_name || ''} ${last_name || ''}`.trim();
-  
   let query, params;
   if (password) {
     const hashedPassword = bcrypt.hashSync(password, 10);
@@ -212,7 +136,6 @@ app.put('/api/users/:id', authenticateToken, isAdmin, (req, res) => {
     query = 'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, full_name = ?, email = ?, description = ? WHERE id = ?';
     params = [username, role, first_name, last_name, full_name, email, description, req.params.id];
   }
-  
   db.run(query, params, function(err) {
     if (err) return res.status(500).json({ error: 'Failed to update user' });
     res.json({ message: 'User updated successfully' });
@@ -227,9 +150,18 @@ app.delete('/api/users/:id', authenticateToken, isAdmin, (req, res) => {
   });
 });
 
-// ===== EQUIPMENT =====
 app.get('/api/equipment', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM equipment ORDER BY created_at DESC', [], (err, rows) => {
+  db.all('SELECT * FROM equipment ORDER BY created_at ASC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(rows);
+  });
+});
+
+app.get('/api/equipment/latest-status', authenticateToken, (req, res) => {
+  db.all(`SELECT e.equipment_id, e.name, e.type, e.location,
+    COALESCE((SELECT er.status FROM equipment_reports er WHERE er.equipment_id = e.equipment_id ORDER BY er.created_at DESC LIMIT 1), 'working') as last_status,
+    COALESCE((SELECT er.description FROM equipment_reports er WHERE er.equipment_id = e.equipment_id ORDER BY er.created_at DESC LIMIT 1), '') as last_description
+    FROM equipment e ORDER BY e.created_at ASC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
@@ -252,15 +184,10 @@ app.delete('/api/equipment/:id', authenticateToken, isAdmin, (req, res) => {
   });
 });
 
-// ===== SHIFTS =====
 app.get('/api/shifts', authenticateToken, (req, res) => {
   let query = req.user.role === 'admin'
-    ? `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, 
-       (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report 
-       FROM shifts s JOIN users u ON s.user_id = u.id ORDER BY s.start_time DESC`
-    : `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name,
-       (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report
-       FROM shifts s JOIN users u ON s.user_id = u.id WHERE s.user_id = ? ORDER BY s.start_time DESC`;
+    ? `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report FROM shifts s JOIN users u ON s.user_id = u.id ORDER BY s.start_time DESC`
+    : `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report FROM shifts s JOIN users u ON s.user_id = u.id WHERE s.user_id = ? ORDER BY s.start_time DESC`;
   let params = req.user.role === 'admin' ? [] : [req.user.id];
   db.all(query, params, (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
@@ -269,8 +196,7 @@ app.get('/api/shifts', authenticateToken, (req, res) => {
 });
 
 app.get('/api/shifts/:id', authenticateToken, (req, res) => {
-  db.get(`SELECT s.*, u.username, u.first_name, u.last_name, u.full_name FROM shifts s 
-          JOIN users u ON s.user_id = u.id WHERE s.id = ?`, [req.params.id], (err, row) => {
+  db.get(`SELECT s.*, u.username, u.first_name, u.last_name, u.full_name FROM shifts s JOIN users u ON s.user_id = u.id WHERE s.id = ?`, [req.params.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (!row) return res.status(404).json({ error: 'Shift not found' });
     res.json(row);
@@ -288,125 +214,128 @@ app.post('/api/shifts', authenticateToken, isAdmin, (req, res) => {
 });
 
 app.delete('/api/shifts/:id', authenticateToken, isAdmin, (req, res) => {
-  db.all('SELECT audio_file, photo_files FROM reports WHERE shift_id = ?', [req.params.id], (err, reports) => {
+  db.all('SELECT er.photo_files, er.audio_file FROM equipment_reports er JOIN reports r ON er.report_id = r.id WHERE r.shift_id = ?', [req.params.id], (err, items) => {
     if (err) return res.status(500).json({ error: 'Database error' });
-    
     db.run('DELETE FROM shifts WHERE id = ?', [req.params.id], function(err) {
       if (err) return res.status(500).json({ error: 'Failed to delete shift' });
-      
-      reports.forEach(report => {
-        if (report.audio_file) {
-          const audioPath = path.join(uploadsDir, report.audio_file);
-          if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-        }
-        if (report.photo_files) {
+      items.forEach(item => {
+        if (item.audio_file && fs.existsSync(path.join(uploadsDir, item.audio_file))) fs.unlinkSync(path.join(uploadsDir, item.audio_file));
+        if (item.photo_files) {
           try {
-            const photos = JSON.parse(report.photo_files);
-            photos.forEach(photo => {
-              const photoPath = path.join(photosDir, photo);
-              if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
+            JSON.parse(item.photo_files).forEach(photo => {
+              if (fs.existsSync(path.join(photosDir, photo))) fs.unlinkSync(path.join(photosDir, photo));
             });
-          } catch (e) { console.error('Error deleting photos:', e); }
+          } catch (e) {}
         }
       });
-      
       res.json({ message: 'Shift deleted successfully' });
     });
   });
 });
 
-// ===== REPORTS =====
-app.get('/api/shifts/:id/report', authenticateToken, (req, res) => {
-  db.get(`SELECT r.*, u.username, u.first_name, u.last_name, u.full_name,
-          e.name as equipment_name, e.type as equipment_type, e.location as equipment_location
-          FROM reports r JOIN users u ON r.user_id = u.id
-          LEFT JOIN equipment e ON r.equipment_id = e.equipment_id
-          WHERE r.shift_id = ?`, [req.params.id], (err, row) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    if (!row) return res.status(404).json({ error: 'Report not found' });
-    if (row.photo_files) {
-      try {
-        row.photo_files = JSON.parse(row.photo_files);
-      } catch (e) {
-        row.photo_files = [];
+app.post('/api/reports/v2/create', authenticateToken, (req, res) => {
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, file.fieldname.startsWith('audio_') ? uploadsDir : photosDir),
+      filename: (req, file, cb) => {
+        const prefix = file.fieldname.startsWith('audio_') ? 'audio-' : 'photo-';
+        cb(null, prefix + Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
       }
+    }),
+    limits: { fileSize: 10 * 1024 * 1024 }
+  }).any();
+
+  upload(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: 'Upload error: ' + err.message });
+    try {
+      const { shift_id, equipment_items } = req.body;
+      if (!shift_id) return res.status(400).json({ error: 'shift_id is required' });
+      if (!equipment_items) return res.status(400).json({ error: 'equipment_items is required' });
+
+      const existing = await new Promise((resolve, reject) => {
+        db.get('SELECT id FROM reports WHERE shift_id = ?', [shift_id], (err, row) => err ? reject(err) : resolve(row));
+      });
+      if (existing) return res.status(400).json({ error: 'Отчёт уже существует для этой смены' });
+
+      const shift = await new Promise((resolve, reject) => {
+        db.get('SELECT user_id, start_time FROM shifts WHERE id = ?', [shift_id], (err, row) => err ? reject(err) : resolve(row));
+      });
+      if (!shift) return res.status(404).json({ error: 'Shift not found' });
+
+      if (req.user.role !== 'admin') {
+        const shiftDate = new Date(shift.start_time);
+        const today = new Date();
+        shiftDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        if (shiftDate > today) return res.status(403).json({ error: 'Нельзя создать отчёт для будущей смены' });
+        if (shift.user_id !== req.user.id) return res.status(403).json({ error: 'You can only create reports for your own shifts' });
+      }
+
+      const items = JSON.parse(equipment_items);
+      const reportId = await new Promise((resolve, reject) => {
+        db.run('INSERT INTO reports (shift_id, user_id, priority) VALUES (?, ?, ?)', [shift_id, req.user.id, 'normal'],
+          function(err) { err ? reject(err) : resolve(this.lastID); });
+      });
+
+      const filesByEquipment = {};
+      if (req.files) {
+        req.files.forEach(file => {
+          const match = file.fieldname.match(/^(photos|audio)_(.+)$/);
+          if (match) {
+            const [, type, equipmentId] = match;
+            if (!filesByEquipment[equipmentId]) filesByEquipment[equipmentId] = { photos: [], audio: null };
+            if (type === 'photos') filesByEquipment[equipmentId].photos.push(file.filename);
+            else if (type === 'audio') filesByEquipment[equipmentId].audio = file.filename;
+          }
+        });
+      }
+
+      await Promise.all(items.map(item => {
+        const files = filesByEquipment[item.equipment_id] || { photos: [], audio: null };
+        return new Promise((resolve, reject) => {
+          db.run('INSERT INTO equipment_reports (report_id, equipment_id, status, description, photo_files, audio_file) VALUES (?, ?, ?, ?, ?, ?)',
+            [reportId, item.equipment_id, item.status, item.description || '', JSON.stringify(files.photos), files.audio],
+            function(err) { err ? reject(err) : resolve(this.lastID); });
+        });
+      }));
+
+      res.json({ id: reportId, message: 'Отчёт успешно создан', equipment_count: items.length });
+    } catch (error) {
+      console.error('Error creating report:', error);
+      res.status(500).json({ error: 'Failed to create report: ' + error.message });
     }
-    res.json(row);
   });
 });
 
-app.post('/api/reports/media', authenticateToken, reportUpload, (req, res) => {
-  const { shift_id, equipment_id, status, description, priority } = req.body;
-  if (!shift_id) return res.status(400).json({ error: 'shift_id is required' });
-
-  db.get('SELECT id FROM reports WHERE shift_id = ?', [shift_id], (err, existing) => {
-    if (err) return res.status(500).json({ error: 'Database error' });
-    if (existing) return res.status(400).json({ error: 'Report already exists for this shift' });
-
-    db.get('SELECT user_id FROM shifts WHERE id = ?', [shift_id], (err, shift) => {
+app.get('/api/shifts/:id/report/v2', authenticateToken, (req, res) => {
+  db.get('SELECT r.*, u.username, u.first_name, u.last_name, u.full_name FROM reports r JOIN users u ON r.user_id = u.id WHERE r.shift_id = ?',
+    [req.params.id], (err, report) => {
       if (err) return res.status(500).json({ error: 'Database error' });
-      if (!shift) return res.status(404).json({ error: 'Shift not found' });
-      if (req.user.role !== 'admin' && shift.user_id !== req.user.id) {
-        return res.status(403).json({ error: 'You can only create reports for your own shifts' });
-      }
-
-      const audioFile = req.files?.audio?.[0]?.filename || null;
-      const photoFiles = req.files?.photos?.map(f => f.filename) || [];
-      const photoFilesJson = JSON.stringify(photoFiles);
-
-      db.run('INSERT INTO reports (shift_id, user_id, equipment_id, status, description, audio_file, photo_files, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [shift_id, req.user.id, equipment_id, status, description, audioFile, photoFilesJson, priority || 'normal'],
-        function(err) {
-          if (err) return res.status(500).json({ error: 'Failed to create report' });
-          res.json({ id: this.lastID, message: 'Report created successfully', audio_file: audioFile, photo_files: photoFiles });
+      if (!report) return res.status(404).json({ error: 'Report not found' });
+      db.all(`SELECT er.*, e.name, e.type, e.location FROM equipment_reports er JOIN equipment e ON er.equipment_id = e.equipment_id WHERE er.report_id = ? ORDER BY e.created_at ASC`,
+        [report.id], (err, equipmentItems) => {
+          if (err) return res.status(500).json({ error: 'Database error' });
+          equipmentItems = equipmentItems.map(item => {
+            try { item.photo_files = JSON.parse(item.photo_files || '[]'); } catch (e) { item.photo_files = []; }
+            return item;
+          });
+          res.json({
+            report_id: report.id, shift_id: report.shift_id,
+            user: { id: report.user_id, username: report.username, first_name: report.first_name, last_name: report.last_name, full_name: report.full_name },
+            priority: report.priority, created_at: report.created_at, equipment_items: equipmentItems
+          });
         });
     });
-  });
-});
-
-app.put('/api/reports/:id', authenticateToken, isAdmin, (req, res) => {
-  const { equipment_id, status, description, priority } = req.body;
-  db.run('UPDATE reports SET equipment_id = ?, status = ?, description = ?, priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [equipment_id, status, description, priority, req.params.id],
-    function(err) {
-      if (err) return res.status(500).json({ error: 'Failed to update report' });
-      res.json({ message: 'Report updated successfully' });
-    });
-});
-
-app.delete('/api/reports/:id', authenticateToken, isAdmin, (req, res) => {
-  db.get('SELECT audio_file, photo_files FROM reports WHERE id = ?', [req.params.id], (err, report) => {
-    if (err || !report) return res.status(404).json({ error: 'Report not found' });
-    
-    db.run('DELETE FROM reports WHERE id = ?', [req.params.id], function(err) {
-      if (err) return res.status(500).json({ error: 'Failed to delete report' });
-      
-      if (report.audio_file) {
-        const audioPath = path.join(uploadsDir, report.audio_file);
-        if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-      }
-      if (report.photo_files) {
-        try {
-          const photos = JSON.parse(report.photo_files);
-          photos.forEach(photo => {
-            const photoPath = path.join(photosDir, photo);
-            if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
-          });
-        } catch (e) { console.error('Error deleting photos:', e); }
-      }
-      res.json({ message: 'Report deleted successfully' });
-    });
-  });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../frontend/login.html')));
 
 app.listen(PORT, () => {
   console.log(`\n===========================================`);
-  console.log(`  Server v1.1.2 is running`);
+  console.log(`  Server v1.1.3 is running`);
   console.log(`  http://localhost:${PORT}`);
-  console.log(`  Photos: /api/photos/*`);
-  console.log(`  Audio: /api/audio/*`);
+  console.log(`  📦 Отчёт = ВСЁ оборудование сразу`);
+  console.log(`  📅 Проверка даты для инженеров`);
   console.log(`===========================================\n`);
 });
 
