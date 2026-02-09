@@ -5,6 +5,17 @@ let currentShiftId = null;
 
 if (!token) window.location.href = 'login.html';
 
+// Format date to dd/mm/yyyy
+function formatDate(date) {
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
     await loadCurrentUser();
@@ -50,8 +61,8 @@ function displayShifts(shifts) {
         return;
     }
     container.innerHTML = shifts.map(shift => {
-        const start = new Date(shift.start_time).toLocaleString('ru-RU');
-        const end = new Date(shift.end_time).toLocaleString('ru-RU');
+        const start = formatDate(shift.start_time);
+        const end = formatDate(shift.end_time);
         const hasReport = shift.has_report > 0;
         return `
             <div class="col-md-6 col-lg-4 mb-3">
@@ -93,8 +104,8 @@ async function viewShift(shiftId) {
 }
 
 function displayShiftDetails(shift, report, hasReport) {
-    const start = new Date(shift.start_time).toLocaleString('ru-RU');
-    const end = new Date(shift.end_time).toLocaleString('ru-RU');
+    const start = formatDate(shift.start_time);
+    const end = formatDate(shift.end_time);
     
     document.getElementById('shiftDetails').innerHTML = `
         <div class="mb-3">
@@ -125,7 +136,7 @@ function displayReport(report) {
     const statusText = report.status === 'working' ? 'Исправно' : report.status === 'faulty' ? 'Неисправно' : 'Обслуживание';
     
     let html = `
-        <div class="alert alert-success"><i class="bi bi-check-circle"></i> Отчет создан ${new Date(report.created_at).toLocaleString('ru-RU')}</div>
+        <div class="alert alert-success"><i class="bi bi-check-circle"></i> Отчет создан ${formatDate(report.created_at)}</div>
         <div class="mb-3">
             <h6><i class="bi bi-tools"></i> Оборудование:</h6>
             <p>${report.equipment_name || report.equipment_id} <span class="badge bg-${statusBadge}">${statusText}</span></p>
@@ -151,7 +162,7 @@ function displayReport(report) {
                 <h6><i class="bi bi-image-fill"></i> Фотографии (${report.photo_files.length}):</h6>
                 <div class="photo-gallery">
                     ${report.photo_files.map(photo => 
-                        `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')">`
+                        `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')" onerror="this.style.display='none';console.error('Failed to load photo: ${photo}')">`
                     ).join('')}
                 </div>
             </div>
@@ -380,6 +391,63 @@ async function loadUsers() {
     }
 }
 
+// Shift schedule helpers
+function toggleScheduleType() {
+    const fixedSchedule = document.getElementById('fixedSchedule').checked;
+    const scheduleButtons = document.getElementById('scheduleButtons');
+    const manualFields = document.getElementById('manualTimeFields');
+    
+    if (fixedSchedule) {
+        scheduleButtons.style.display = 'block';
+        manualFields.style.display = 'none';
+    } else {
+        scheduleButtons.style.display = 'none';
+        manualFields.style.display = 'block';
+    }
+}
+
+function setSchedule(type) {
+    const dateInput = document.getElementById('shiftDate').value;
+    if (!dateInput) {
+        alert('Сначала выберите дату');
+        return;
+    }
+    
+    const date = new Date(dateInput);
+    let startTime, endTime;
+    
+    if (type === '5/2') {
+        // 5/2: 08:00 - 17:00
+        startTime = new Date(date);
+        startTime.setHours(8, 0, 0);
+        endTime = new Date(date);
+        endTime.setHours(17, 0, 0);
+    } else if (type === '2/2') {
+        // 2/2: 10:00 - 22:00 (12 hours)
+        startTime = new Date(date);
+        startTime.setHours(10, 0, 0);
+        endTime = new Date(date);
+        endTime.setHours(22, 0, 0);
+    }
+    
+    // Format to datetime-local input format
+    const formatDateTimeLocal = (dt) => {
+        const year = dt.getFullYear();
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        const hours = String(dt.getHours()).padStart(2, '0');
+        const minutes = String(dt.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    };
+    
+    document.getElementById('shiftStartTime').value = formatDateTimeLocal(startTime);
+    document.getElementById('shiftEndTime').value = formatDateTimeLocal(endTime);
+    
+    // Highlight selected button
+    document.querySelectorAll('.schedule-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+}
+
 async function createShift() {
     const userId = document.getElementById('shiftUserId').value;
     const startTime = document.getElementById('shiftStartTime').value;
@@ -432,4 +500,7 @@ function setupEventListeners() {
     document.getElementById('manageEquipmentBtn')?.addEventListener('click', openEquipmentModal);
     document.getElementById('addEquipmentBtn')?.addEventListener('click', openAddEquipment);
     document.getElementById('saveEquipmentBtn')?.addEventListener('click', saveEquipment);
+    
+    // Schedule type toggle
+    document.getElementById('fixedSchedule')?.addEventListener('change', toggleScheduleType);
 }
