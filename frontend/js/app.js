@@ -2,10 +2,10 @@ const API_URL = 'http://localhost:3000';
 let token = localStorage.getItem('token');
 let currentUser = null;
 let currentShiftId = null;
+let allEquipment = [];
 
 if (!token) window.location.href = 'login.html';
 
-// Format date to dd/mm/yyyy
 function formatDate(date) {
     const d = new Date(date);
     const day = String(d.getDate()).padStart(2, '0');
@@ -16,7 +16,6 @@ function formatDate(date) {
     return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
-// Init
 document.addEventListener('DOMContentLoaded', async () => {
     await loadCurrentUser();
     await loadShifts();
@@ -26,9 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadCurrentUser() {
     try {
-        const res = await fetch(`${API_URL}/api/auth/me`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch(`${API_URL}/api/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!res.ok) throw new Error();
         currentUser = await res.json();
         document.getElementById('userInfo').textContent = `${currentUser.full_name || currentUser.username} (${currentUser.role === 'admin' ? 'Админ' : 'Инженер'})`;
@@ -44,9 +41,7 @@ async function loadCurrentUser() {
 
 async function loadShifts() {
     try {
-        const res = await fetch(`${API_URL}/api/shifts`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch(`${API_URL}/api/shifts`, { headers: { 'Authorization': `Bearer ${token}` } });
         const shifts = await res.json();
         displayShifts(shifts);
     } catch (error) {
@@ -70,12 +65,7 @@ function displayShifts(shifts) {
                     ${hasReport ? '<span class="badge bg-success badge-report"><i class="bi bi-check-circle"></i> Отчет есть</span>' : '<span class="badge bg-warning badge-report"><i class="bi bi-exclamation-circle"></i> Нет отчета</span>'}
                     <div class="card-body">
                         <h5 class="card-title"><i class="bi bi-person-badge"></i> ${shift.full_name || shift.username}</h5>
-                        <p class="card-text">
-                            <small class="text-muted">
-                                <i class="bi bi-clock"></i> ${start}<br>
-                                <i class="bi bi-clock-fill"></i> ${end}
-                            </small>
-                        </p>
+                        <p class="card-text"><small class="text-muted"><i class="bi bi-clock"></i> ${start}<br><i class="bi bi-clock-fill"></i> ${end}</small></p>
                         ${shift.description ? `<p class="card-text"><i class="bi bi-info-circle"></i> ${shift.description}</p>` : ''}
                     </div>
                 </div>
@@ -89,13 +79,11 @@ async function viewShift(shiftId) {
     try {
         const [shiftRes, reportRes] = await Promise.all([
             fetch(`${API_URL}/api/shifts/${shiftId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
-            fetch(`${API_URL}/api/shifts/${shiftId}/report`, { headers: { 'Authorization': `Bearer ${token}` } })
+            fetch(`${API_URL}/api/shifts/${shiftId}/report/v2`, { headers: { 'Authorization': `Bearer ${token}` } })
         ]);
-        
         const shift = await shiftRes.json();
         const hasReport = reportRes.ok;
         const report = hasReport ? await reportRes.json() : null;
-        
         displayShiftDetails(shift, report, hasReport);
         new bootstrap.Modal(document.getElementById('shiftModal')).show();
     } catch (error) {
@@ -106,131 +94,155 @@ async function viewShift(shiftId) {
 function displayShiftDetails(shift, report, hasReport) {
     const start = formatDate(shift.start_time);
     const end = formatDate(shift.end_time);
-    
     document.getElementById('shiftDetails').innerHTML = `
-        <div class="mb-3">
-            <h6><i class="bi bi-person-badge"></i> Инженер:</h6>
-            <p>${shift.full_name || shift.username}</p>
-        </div>
-        <div class="mb-3">
-            <h6><i class="bi bi-clock"></i> Время смены:</h6>
-            <p>Начало: ${start}<br>Конец: ${end}</p>
-        </div>
+        <div class="mb-3"><h6><i class="bi bi-person-badge"></i> Инженер:</h6><p>${shift.full_name || shift.username}</p></div>
+        <div class="mb-3"><h6><i class="bi bi-clock"></i> Время смены:</h6><p>Начало: ${start}<br>Конец: ${end}</p></div>
         ${shift.description ? `<div class="mb-3"><h6><i class="bi bi-info-circle"></i> Описание:</h6><p>${shift.description}</p></div>` : ''}
     `;
-    
-    // Кнопка удаления смены для админа (#3)
     const footer = document.getElementById('shiftModalFooter');
     if (currentUser.role === 'admin') {
         footer.innerHTML = `<button class="btn btn-danger" onclick="deleteShift(${shift.id})"><i class="bi bi-trash"></i> Удалить смену</button>`;
     } else {
         footer.innerHTML = '';
     }
-    
     const reportSection = document.getElementById('reportSection');
     if (hasReport) {
-        displayReport(report);
+        displayReportV2(report);
     } else {
         const canCreate = currentUser.role === 'admin' || shift.user_id === currentUser.id;
+        const shiftDate = new Date(shift.start_time);
+        const today = new Date();
+        shiftDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        const isFuture = shiftDate > today;
         reportSection.innerHTML = canCreate
-            ? `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> Отчет еще не создан</div>
-               <button class="btn btn-success" onclick="openCreateReport()"><i class="bi bi-file-earmark-plus"></i> Создать отчет</button>`
+            ? (isFuture && currentUser.role !== 'admin'
+                ? `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> Нельзя создать отчёт для будущей смены</div>`
+                : `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> Отчет еще не создан</div>
+                   <button class="btn btn-success" onclick="openCreateReport()"><i class="bi bi-file-earmark-plus"></i> Создать отчет</button>`)
             : `<div class="alert alert-info"><i class="bi bi-info-circle"></i> Отчет еще не создан инженером</div>`;
     }
 }
 
-function displayReport(report) {
-    const statusBadge = report.status === 'working' ? 'success' : report.status === 'faulty' ? 'danger' : 'warning';
-    const statusText = report.status === 'working' ? 'Исправно' : report.status === 'faulty' ? 'Неисправно' : 'Обслуживание';
-    
-    let html = `
-        <div class="alert alert-success"><i class="bi bi-check-circle"></i> Отчет создан ${formatDate(report.created_at)}</div>
-        <div class="mb-3">
-            <h6><i class="bi bi-tools"></i> Оборудование:</h6>
-            <p>${report.equipment_name || report.equipment_id} <span class="badge bg-${statusBadge}">${statusText}</span></p>
-        </div>
-        <div class="mb-3">
-            <h6><i class="bi bi-text-left"></i> Описание:</h6>
-            <p>${report.description}</p>
-        </div>
-    `;
-    
-    if (report.audio_file) {
-        html += `
-            <div class="mb-3">
-                <h6><i class="bi bi-mic-fill"></i> Аудио отчет:</h6>
-                <audio controls class="w-100" src="${API_URL}/api/audio/${report.audio_file}"></audio>
-            </div>
-        `;
-    }
-    
-    if (report.photo_files && report.photo_files.length > 0) {
-        html += `
-            <div class="mb-3">
-                <h6><i class="bi bi-image-fill"></i> Фотографии (${report.photo_files.length}):</h6>
-                <div class="photo-gallery">
-                    ${report.photo_files.map(photo => 
-                        `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')" onerror="this.style.display='none';console.error('Failed to load: ${photo}')">`
-                    ).join('')}
+function displayReportV2(report) {
+    let html = `<div class="alert alert-success"><i class="bi bi-check-circle"></i> Отчет создан ${formatDate(report.created_at)}</div>`;
+    if (report.equipment_items && report.equipment_items.length > 0) {
+        html += `<h6><i class="bi bi-tools"></i> Оборудование (${report.equipment_items.length}):</h6>`;
+        report.equipment_items.forEach(item => {
+            const statusBadge = item.status === 'working' ? 'success' : item.status === 'faulty' ? 'danger' : 'warning';
+            const statusText = item.status === 'working' ? 'Исправно' : item.status === 'faulty' ? 'Неисправно' : 'Обслуживание';
+            html += `
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h6 class="card-title">${item.name} <span class="badge bg-${statusBadge}">${statusText}</span></h6>
+                        <p class="card-text"><small class="text-muted">${item.equipment_id} • ${item.type || ''} • ${item.location || ''}</small></p>
+                        ${item.description ? `<p class="card-text">${item.description}</p>` : ''}
+                        ${item.audio_file ? `<audio controls class="w-100 mt-2" src="${API_URL}/api/audio/${item.audio_file}"></audio>` : ''}
+                        ${item.photo_files && item.photo_files.length > 0 ? `
+                            <div class="photo-gallery mt-2">
+                                ${item.photo_files.map(photo => `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')" onerror="this.style.display='none'">`).join('')}
+                            </div>` : ''}
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        });
     }
-    
-    if (currentUser.role === 'admin') {
-        html += `<button class="btn btn-danger mt-2" onclick="deleteReport(${report.id})"><i class="bi bi-trash"></i> Удалить отчет</button>`;
-    }
-    
     document.getElementById('reportSection').innerHTML = html;
 }
 
-function openCreateReport() {
-    document.getElementById('reportShiftId').value = currentShiftId;
-    bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
-    new bootstrap.Modal(document.getElementById('createReportModal')).show();
+async function openCreateReport() {
+    try {
+        const res = await fetch(`${API_URL}/api/equipment/latest-status`, { headers: { 'Authorization': `Bearer ${token}` } });
+        allEquipment = await res.json();
+        if (allEquipment.length === 0) {
+            alert('Нет оборудования в системе');
+            return;
+        }
+        document.getElementById('reportShiftId').value = currentShiftId;
+        renderEquipmentCards();
+        bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
+        new bootstrap.Modal(document.getElementById('createReportModal')).show();
+    } catch (error) {
+        alert('Ошибка загрузки оборудования');
+    }
 }
 
-async function createReport() {
+function renderEquipmentCards() {
+    const container = document.getElementById('equipmentCardsContainer');
+    container.innerHTML = allEquipment.map((eq, index) => {
+        const statusOptions = ['working', 'faulty', 'maintenance'];
+        const statusNames = { working: 'Исправно', faulty: 'Неисправно', maintenance: 'Требует обслуживания' };
+        return `
+            <div class="card mb-3 equipment-card" data-equipment-id="${eq.equipment_id}">
+                <div class="card-body">
+                    <h6 class="card-title"><i class="bi bi-tools"></i> ${eq.name}</h6>
+                    <p class="text-muted small">${eq.equipment_id} • ${eq.type || ''} • ${eq.location || ''}</p>
+                    <div class="mb-2">
+                        <label class="form-label"><i class="bi bi-circle-fill"></i> Статус</label>
+                        <select class="form-control equipment-status" data-equipment-id="${eq.equipment_id}">
+                            ${statusOptions.map(status => `<option value="${status}" ${status === eq.last_status ? 'selected' : ''}>${statusNames[status]}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label"><i class="bi bi-text-left"></i> Описание</label>
+                        <textarea class="form-control equipment-description" data-equipment-id="${eq.equipment_id}" rows="2" placeholder="Опишите состояние...">${eq.last_description || ''}</textarea>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label"><i class="bi bi-image-fill"></i> Фото (до 5 шт)</label>
+                        <input type="file" class="form-control equipment-photos" data-equipment-id="${eq.equipment_id}" accept="image/*" multiple>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label"><i class="bi bi-mic-fill"></i> Аудио</label>
+                        <input type="file" class="form-control equipment-audio" data-equipment-id="${eq.equipment_id}" accept="audio/*">
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function createReportV2() {
     const shiftId = document.getElementById('reportShiftId').value;
-    const equipmentId = document.getElementById('reportEquipment').value;
-    const status = document.getElementById('reportStatus').value;
-    const description = document.getElementById('reportDescription').value;
-    const audioFile = document.getElementById('reportAudio').files[0];
-    const photoFiles = Array.from(document.getElementById('reportPhotos').files);
-    
-    if (!equipmentId || !status || !description) {
-        alert('Заполните все обязательные поля');
-        return;
-    }
-    
-    if (photoFiles.length > 5) {
-        alert('Можно загрузить максимум 5 фотографий');
-        return;
-    }
-    
+    const equipmentItems = [];
     const formData = new FormData();
     formData.append('shift_id', shiftId);
-    formData.append('equipment_id', equipmentId);
-    formData.append('status', status);
-    formData.append('description', description);
-    if (audioFile) formData.append('audio', audioFile);
-    photoFiles.forEach(photo => formData.append('photos', photo));
+    
+    allEquipment.forEach(eq => {
+        const status = document.querySelector(`.equipment-status[data-equipment-id="${eq.equipment_id}"]`).value;
+        const description = document.querySelector(`.equipment-description[data-equipment-id="${eq.equipment_id}"]`).value;
+        const photos = document.querySelector(`.equipment-photos[data-equipment-id="${eq.equipment_id}"]`).files;
+        const audio = document.querySelector(`.equipment-audio[data-equipment-id="${eq.equipment_id}"]`).files[0];
+        
+        if (photos.length > 5) {
+            alert(`${eq.name}: максимум 5 фото`);
+            return;
+        }
+        
+        equipmentItems.push({ equipment_id: eq.equipment_id, status, description });
+        
+        Array.from(photos).forEach(photo => formData.append(`photos_${eq.equipment_id}`, photo));
+        if (audio) formData.append(`audio_${eq.equipment_id}`, audio);
+    });
+    
+    if (equipmentItems.length === 0) {
+        alert('Нет оборудования для отчёта');
+        return;
+    }
+    
+    formData.append('equipment_items', JSON.stringify(equipmentItems));
     
     try {
-        const res = await fetch(`${API_URL}/api/reports/media`, {
+        const res = await fetch(`${API_URL}/api/reports/v2/create`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
             body: formData
         });
-        
         if (!res.ok) {
             const error = await res.json();
             throw new Error(error.error);
         }
-        
         alert('Отчет успешно создан!');
         bootstrap.Modal.getInstance(document.getElementById('createReportModal')).hide();
-        document.getElementById('reportForm').reset();
         await loadShifts();
         await viewShift(shiftId);
     } catch (error) {
@@ -238,31 +250,10 @@ async function createReport() {
     }
 }
 
-async function deleteReport(reportId) {
-    if (!confirm('Удалить отчет?')) return;
-    
-    try {
-        await fetch(`${API_URL}/api/reports/${reportId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        alert('Отчет удален');
-        bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
-        await loadShifts();
-    } catch (error) {
-        alert('Ошибка удаления');
-    }
-}
-
-// #3 - Удаление смены (только админ)
 async function deleteShift(shiftId) {
     if (!confirm('Удалить смену? Все отчеты и файлы будут удалены.')) return;
-    
     try {
-        await fetch(`${API_URL}/api/shifts/${shiftId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        await fetch(`${API_URL}/api/shifts/${shiftId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
         alert('Смена удалена');
         bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
         await loadShifts();
@@ -279,19 +270,13 @@ function viewPhoto(photoUrl) {
 let equipment = [];
 async function loadEquipment() {
     try {
-        const res = await fetch(`${API_URL}/api/equipment`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch(`${API_URL}/api/equipment`, { headers: { 'Authorization': `Bearer ${token}` } });
         equipment = await res.json();
-        const select = document.getElementById('reportEquipment');
-        select.innerHTML = '<option value="">Выберите...</option>' + 
-            equipment.map(eq => `<option value="${eq.equipment_id}">${eq.name} (${eq.equipment_id})</option>`).join('');
     } catch (error) {
         console.error('Error loading equipment:', error);
     }
 }
 
-// Equipment Management
 async function openEquipmentModal() {
     await loadEquipment();
     displayEquipmentList();
@@ -304,38 +289,19 @@ function displayEquipmentList() {
         container.innerHTML = '<div class="alert alert-info">Оборудование не добавлено</div>';
         return;
     }
-    
     container.innerHTML = `
         <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Название</th>
-                    <th>Тип</th>
-                    <th>Расположение</th>
-                    <th>Статус</th>
-                    <th>Действия</th>
-                </tr>
-            </thead>
+            <thead><tr><th>ID</th><th>Название</th><th>Тип</th><th>Расположение</th><th>Действия</th></tr></thead>
             <tbody>
-                ${equipment.map(eq => {
-                    const statusBadge = eq.status === 'working' ? 'success' : eq.status === 'faulty' ? 'danger' : eq.status === 'maintenance' ? 'warning' : 'secondary';
-                    const statusText = eq.status === 'working' ? 'Работает' : eq.status === 'faulty' ? 'Неисправно' : eq.status === 'maintenance' ? 'Обслуживание' : 'Снято';
-                    return `
-                        <tr>
-                            <td>${eq.equipment_id}</td>
-                            <td>${eq.name}</td>
-                            <td>${eq.type || '-'}</td>
-                            <td>${eq.location || '-'}</td>
-                            <td><span class="badge bg-${statusBadge}">${statusText}</span></td>
-                            <td>
-                                <button class="btn btn-sm btn-danger" onclick="deleteEquipment(${eq.id})">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('')}
+                ${equipment.map(eq => `
+                    <tr>
+                        <td>${eq.equipment_id}</td>
+                        <td>${eq.name}</td>
+                        <td>${eq.type || '-'}</td>
+                        <td>${eq.location || '-'}</td>
+                        <td><button class="btn btn-sm btn-danger" onclick="deleteEquipment(${eq.id})"><i class="bi bi-trash"></i></button></td>
+                    </tr>
+                `).join('')}
             </tbody>
         </table>
     `;
@@ -352,30 +318,17 @@ async function saveEquipment() {
     const type = document.getElementById('equipmentType').value;
     const location = document.getElementById('equipmentLocation').value;
     const description = document.getElementById('equipmentDescription').value;
-    
     if (!equipmentId || !name) {
         alert('Заполните ID и название');
         return;
     }
-    
     try {
         const res = await fetch(`${API_URL}/api/equipment`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                equipment_id: equipmentId,
-                name,
-                type,
-                location,
-                description
-            })
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ equipment_id: equipmentId, name, type, location, description })
         });
-        
         if (!res.ok) throw new Error('Ошибка создания');
-        
         alert('Оборудование добавлено!');
         bootstrap.Modal.getInstance(document.getElementById('addEquipmentModal')).hide();
         await loadEquipment();
@@ -387,12 +340,8 @@ async function saveEquipment() {
 
 async function deleteEquipment(equipmentId) {
     if (!confirm('Удалить оборудование?')) return;
-    
     try {
-        await fetch(`${API_URL}/api/equipment/${equipmentId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        await fetch(`${API_URL}/api/equipment/${equipmentId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
         alert('Оборудование удалено');
         await loadEquipment();
         displayEquipmentList();
@@ -401,13 +350,10 @@ async function deleteEquipment(equipmentId) {
     }
 }
 
-// #4 - Управление пользователями
 let users = [];
 async function loadUsers() {
     try {
-        const res = await fetch(`${API_URL}/api/users`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetch(`${API_URL}/api/users`, { headers: { 'Authorization': `Bearer ${token}` } });
         users = await res.json();
         const select = document.getElementById('shiftUserId');
         const engineers = users.filter(u => u.role === 'engineer');
@@ -429,19 +375,9 @@ function displayUsersList() {
         container.innerHTML = '<div class="alert alert-info">Пользователей нет</div>';
         return;
     }
-    
     container.innerHTML = `
         <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Логин</th>
-                    <th>Имя</th>
-                    <th>Роль</th>
-                    <th>Email</th>
-                    <th>Описание</th>
-                    <th>Действия</th>
-                </tr>
-            </thead>
+            <thead><tr><th>Логин</th><th>Имя</th><th>Роль</th><th>Email</th><th>Описание</th><th>Действия</th></tr></thead>
             <tbody>
                 ${users.map(user => {
                     const roleBadge = user.role === 'admin' ? 'danger' : 'primary';
@@ -454,9 +390,7 @@ function displayUsersList() {
                             <td><span class="badge bg-${roleBadge}">${roleText}</span></td>
                             <td>${user.email || '-'}</td>
                             <td>${user.description || '-'}</td>
-                            <td>
-                                ${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id})"><i class="bi bi-trash"></i></button>` : '<span class="text-muted">Текущий</span>'}
-                            </td>
+                            <td>${canDelete ? `<button class="btn btn-sm btn-danger" onclick="deleteUser(${user.id})"><i class="bi bi-trash"></i></button>` : '<span class="text-muted">Текущий</span>'}</td>
                         </tr>
                     `;
                 }).join('')}
@@ -478,32 +412,17 @@ async function saveUser() {
     const lastName = document.getElementById('userLastName').value;
     const email = document.getElementById('userEmail').value;
     const description = document.getElementById('userDescription').value;
-    
     if (!username || !password) {
         alert('Заполните логин и пароль');
         return;
     }
-    
     try {
         const res = await fetch(`${API_URL}/api/users`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                username,
-                password,
-                role,
-                first_name: firstName,
-                last_name: lastName,
-                email,
-                description
-            })
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, role, first_name: firstName, last_name: lastName, email, description })
         });
-        
         if (!res.ok) throw new Error('Ошибка создания пользователя');
-        
         alert('Пользователь создан!');
         bootstrap.Modal.getInstance(document.getElementById('addUserModal')).hide();
         await loadUsers();
@@ -515,12 +434,8 @@ async function saveUser() {
 
 async function deleteUser(userId) {
     if (!confirm('Удалить пользователя? Все его смены и отчеты будут удалены.')) return;
-    
     try {
-        await fetch(`${API_URL}/api/users/${userId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        await fetch(`${API_URL}/api/users/${userId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
         alert('Пользователь удален');
         await loadUsers();
         displayUsersList();
@@ -529,28 +444,21 @@ async function deleteUser(userId) {
     }
 }
 
-// #2 - Свободный график + фиксированные графики
 function setSchedule(type) {
     const dateInput = document.getElementById('shiftDate').value;
     if (!dateInput && type !== 'custom') {
         alert('Сначала выберите дату');
         return;
     }
-    
     const timeFields = document.getElementById('timeFieldsContainer');
-    
     if (type === 'custom') {
-        // Свободный график - показываем поля
         timeFields.style.display = 'block';
         document.querySelectorAll('.schedule-btn').forEach(btn => btn.classList.remove('active'));
         event.target.classList.add('active');
         return;
     }
-    
-    // Фиксированные графики - заполняем автоматически
     const date = new Date(dateInput);
     let startTime, endTime;
-    
     if (type === '5/2') {
         startTime = new Date(date);
         startTime.setHours(8, 0, 0);
@@ -562,7 +470,6 @@ function setSchedule(type) {
         endTime = new Date(date);
         endTime.setHours(22, 0, 0);
     }
-    
     const formatDateTimeLocal = (dt) => {
         const year = dt.getFullYear();
         const month = String(dt.getMonth() + 1).padStart(2, '0');
@@ -571,10 +478,8 @@ function setSchedule(type) {
         const minutes = String(dt.getMinutes()).padStart(2, '0');
         return `${year}-${month}-${day}T${hours}:${minutes}`;
     };
-    
     document.getElementById('shiftStartTime').value = formatDateTimeLocal(startTime);
     document.getElementById('shiftEndTime').value = formatDateTimeLocal(endTime);
-    
     timeFields.style.display = 'block';
     document.querySelectorAll('.schedule-btn').forEach(btn => btn.classList.remove('active'));
     event.target.classList.add('active');
@@ -585,25 +490,15 @@ async function createShift() {
     const startTime = document.getElementById('shiftStartTime').value;
     const endTime = document.getElementById('shiftEndTime').value;
     const description = document.getElementById('shiftDescription').value;
-    
     if (!userId || !startTime || !endTime) {
         alert('Заполните все обязательные поля (инженер, время)');
         return;
     }
-    
     try {
         await fetch(`${API_URL}/api/shifts`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                user_id: userId,
-                start_time: startTime,
-                end_time: endTime,
-                description
-            })
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, start_time: startTime, end_time: endTime, description })
         });
         alert('Смена создана');
         bootstrap.Modal.getInstance(document.getElementById('addShiftModal')).hide();
@@ -620,21 +515,14 @@ function setupEventListeners() {
         localStorage.removeItem('token');
         window.location.href = 'login.html';
     });
-    
-    document.getElementById('saveReportBtn').addEventListener('click', createReport);
-    
+    document.getElementById('saveReportBtn').addEventListener('click', createReportV2);
     document.getElementById('addShiftBtn')?.addEventListener('click', () => {
         new bootstrap.Modal(document.getElementById('addShiftModal')).show();
     });
-    
     document.getElementById('saveShiftBtn')?.addEventListener('click', createShift);
-    
-    // Equipment management
     document.getElementById('manageEquipmentBtn')?.addEventListener('click', openEquipmentModal);
     document.getElementById('addEquipmentBtn')?.addEventListener('click', openAddEquipment);
     document.getElementById('saveEquipmentBtn')?.addEventListener('click', saveEquipment);
-    
-    // Users management (#4)
     document.getElementById('manageUsersBtn')?.addEventListener('click', openUsersModal);
     document.getElementById('addUserBtn')?.addEventListener('click', openAddUser);
     document.getElementById('saveUserBtn')?.addEventListener('click', saveUser);
