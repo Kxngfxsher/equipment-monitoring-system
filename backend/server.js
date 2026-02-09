@@ -1,5 +1,5 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').nverbose();
+const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
