@@ -24,6 +24,10 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
 if (!fs.existsSync(tasksDir)) fs.mkdirSync(tasksDir, { recursive: true });
 
+// Статическая папка для фото (ИСПРАВЛЕНИЕ #1)
+app.use('/api/photos', express.static(photosDir));
+app.use('/api/audio', express.static(uploadsDir));
+
 // Multer for audio files
 const audioStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
@@ -88,7 +92,7 @@ function initDatabase() {
     db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'engineer')), first_name TEXT, last_name TEXT,
-      full_name TEXT, email TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      full_name TEXT, email TEXT, description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS shifts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, start_time DATETIME NOT NULL,
@@ -121,11 +125,11 @@ function initDatabase() {
     )`);
 
     const hashedPassword = bcrypt.hashSync('admin123', 10);
-    db.run(`INSERT OR IGNORE INTO users (username, password, role, first_name, last_name, full_name) 
-            VALUES ('admin', ?, 'admin', 'Администратор', 'Системы', 'Администратор Системы')`, [hashedPassword]);
+    db.run(`INSERT OR IGNORE INTO users (username, password, role, first_name, last_name, full_name, description) 
+            VALUES ('admin', ?, 'admin', 'Администратор', 'Системы', 'Администратор Системы', 'Главный администратор')`, [hashedPassword]);
     const engPassword = bcrypt.hashSync('eng123', 10);
-    db.run(`INSERT OR IGNORE INTO users (username, password, role, first_name, last_name, full_name) 
-            VALUES ('engineer1', ?, 'engineer', 'Тест', 'Инженер', 'Тест Инженер')`, [engPassword]);
+    db.run(`INSERT OR IGNORE INTO users (username, password, role, first_name, last_name, full_name, description) 
+            VALUES ('engineer1', ?, 'engineer', 'Тест', 'Инженер', 'Тест Инженер', 'Тестовый инженер')`, [engPassword]);
   });
 }
 
@@ -162,24 +166,52 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
   });
 });
 
-// ===== USERS =====
+// ===== USERS (UPDATED #4) =====
 app.get('/api/users', authenticateToken, isAdmin, (req, res) => {
-  db.all('SELECT id, username, role, first_name, last_name, full_name, email, created_at FROM users', [], (err, rows) => {
+  db.all('SELECT id, username, role, first_name, last_name, full_name, email, description, created_at FROM users', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
 });
 
 app.post('/api/users', authenticateToken, isAdmin, (req, res) => {
-  const { username, password, role, first_name, last_name, email } = req.body;
+  const { username, password, role, first_name, last_name, email, description } = req.body;
   const full_name = `${first_name || ''} ${last_name || ''}`.trim();
   const hashedPassword = bcrypt.hashSync(password, 10);
-  db.run('INSERT INTO users (username, password, role, first_name, last_name, full_name, email) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [username, hashedPassword, role, first_name, last_name, full_name, email],
+  db.run('INSERT INTO users (username, password, role, first_name, last_name, full_name, email, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [username, hashedPassword, role, first_name, last_name, full_name, email, description],
     function(err) {
       if (err) return res.status(500).json({ error: 'Failed to create user' });
       res.json({ id: this.lastID, message: 'User created successfully' });
     });
+});
+
+app.put('/api/users/:id', authenticateToken, isAdmin, (req, res) => {
+  const { username, password, role, first_name, last_name, email, description } = req.body;
+  const full_name = `${first_name || ''} ${last_name || ''}`.trim();
+  
+  let query, params;
+  if (password) {
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    query = 'UPDATE users SET username = ?, password = ?, role = ?, first_name = ?, last_name = ?, full_name = ?, email = ?, description = ? WHERE id = ?';
+    params = [username, hashedPassword, role, first_name, last_name, full_name, email, description, req.params.id];
+  } else {
+    query = 'UPDATE users SET username = ?, role = ?, first_name = ?, last_name = ?, full_name = ?, email = ?, description = ? WHERE id = ?';
+    params = [username, role, first_name, last_name, full_name, email, description, req.params.id];
+  }
+  
+  db.run(query, params, function(err) {
+    if (err) return res.status(500).json({ error: 'Failed to update user' });
+    res.json({ message: 'User updated successfully' });
+  });
+});
+
+app.delete('/api/users/:id', authenticateToken, isAdmin, (req, res) => {
+  if (req.params.id == req.user.id) return res.status(400).json({ error: 'Cannot delete yourself' });
+  db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: 'Failed to delete user' });
+    res.json({ message: 'User deleted successfully' });
+  });
 });
 
 // ===== EQUIPMENT =====
@@ -200,7 +232,14 @@ app.post('/api/equipment', authenticateToken, isAdmin, (req, res) => {
     });
 });
 
-// ===== SHIFTS =====
+app.delete('/api/equipment/:id', authenticateToken, isAdmin, (req, res) => {
+  db.run('DELETE FROM equipment WHERE id = ?', [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: 'Failed to delete equipment' });
+    res.json({ message: 'Equipment deleted successfully' });
+  });
+});
+
+// ===== SHIFTS (UPDATED #3 - админ может удалять) =====
 app.get('/api/shifts', authenticateToken, (req, res) => {
   let query = req.user.role === 'admin'
     ? `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, 
@@ -236,9 +275,31 @@ app.post('/api/shifts', authenticateToken, isAdmin, (req, res) => {
 });
 
 app.delete('/api/shifts/:id', authenticateToken, isAdmin, (req, res) => {
-  db.run('DELETE FROM shifts WHERE id = ?', [req.params.id], function(err) {
-    if (err) return res.status(500).json({ error: 'Failed to delete shift' });
-    res.json({ message: 'Shift deleted successfully' });
+  // Сначала получаем все отчеты для удаления файлов
+  db.all('SELECT audio_file, photo_files FROM reports WHERE shift_id = ?', [req.params.id], (err, reports) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    
+    // Удаляем смену (отчеты удалятся автоматически по CASCADE)
+    db.run('DELETE FROM shifts WHERE id = ?', [req.params.id], function(err) {
+      if (err) return res.status(500).json({ error: 'Failed to delete shift' });
+      
+      // Удаляем физические файлы
+      reports.forEach(report => {
+        if (report.audio_file) {
+          const audioPath = path.join(uploadsDir, report.audio_file);
+          if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+        }
+        if (report.photo_files) {
+          const photos = JSON.parse(report.photo_files);
+          photos.forEach(photo => {
+            const photoPath = path.join(photosDir, photo);
+            if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
+          });
+        }
+      });
+      
+      res.json({ message: 'Shift deleted successfully' });
+    });
   });
 });
 
@@ -392,7 +453,7 @@ app.get('/api/files/:filename', authenticateToken, (req, res) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../frontend/login.html')));
 
 app.listen(PORT, () => {
-  console.log(`Server v1.1 is running on http://localhost:${PORT}`);
+  console.log(`Server v1.1.2 is running on http://localhost:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
