@@ -255,6 +255,116 @@ async function loadEquipment() {
     }
 }
 
+// Equipment Management
+async function openEquipmentModal() {
+    await loadEquipment();
+    displayEquipmentList();
+    new bootstrap.Modal(document.getElementById('equipmentModal')).show();
+}
+
+function displayEquipmentList() {
+    const container = document.getElementById('equipmentList');
+    if (equipment.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Оборудование не добавлено</div>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Название</th>
+                    <th>Тип</th>
+                    <th>Расположение</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${equipment.map(eq => {
+                    const statusBadge = eq.status === 'working' ? 'success' : eq.status === 'faulty' ? 'danger' : eq.status === 'maintenance' ? 'warning' : 'secondary';
+                    const statusText = eq.status === 'working' ? 'Работает' : eq.status === 'faulty' ? 'Неисправно' : eq.status === 'maintenance' ? 'Обслуживание' : 'Снято';
+                    return `
+                        <tr>
+                            <td>${eq.equipment_id}</td>
+                            <td>${eq.name}</td>
+                            <td>${eq.type || '-'}</td>
+                            <td>${eq.location || '-'}</td>
+                            <td><span class="badge bg-${statusBadge}">${statusText}</span></td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" onclick="deleteEquipment(${eq.id})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function openAddEquipment() {
+    document.getElementById('equipmentForm').reset();
+    new bootstrap.Modal(document.getElementById('addEquipmentModal')).show();
+}
+
+async function saveEquipment() {
+    const equipmentId = document.getElementById('equipmentId').value;
+    const name = document.getElementById('equipmentName').value;
+    const type = document.getElementById('equipmentType').value;
+    const location = document.getElementById('equipmentLocation').value;
+    const description = document.getElementById('equipmentDescription').value;
+    
+    if (!equipmentId || !name) {
+        alert('Заполните ID и название');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_URL}/api/equipment`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                equipment_id: equipmentId,
+                name,
+                type,
+                location,
+                description
+            })
+        });
+        
+        if (!res.ok) throw new Error('Ошибка создания');
+        
+        alert('Оборудование добавлено!');
+        bootstrap.Modal.getInstance(document.getElementById('addEquipmentModal')).hide();
+        await loadEquipment();
+        displayEquipmentList();
+    } catch (error) {
+        alert(`Ошибка: ${error.message}`);
+    }
+}
+
+async function deleteEquipment(equipmentId) {
+    if (!confirm('Удалить оборудование?')) return;
+    
+    try {
+        await fetch(`${API_URL}/api/equipment/${equipmentId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        alert('Оборудование удалено');
+        await loadEquipment();
+        displayEquipmentList();
+    } catch (error) {
+        alert('Ошибка удаления');
+    }
+}
+
 let users = [];
 async function loadUsers() {
     try {
@@ -317,4 +427,9 @@ function setupEventListeners() {
     });
     
     document.getElementById('saveShiftBtn')?.addEventListener('click', createShift);
+    
+    // Equipment management
+    document.getElementById('manageEquipmentBtn')?.addEventListener('click', openEquipmentModal);
+    document.getElementById('addEquipmentBtn')?.addEventListener('click', openAddEquipment);
+    document.getElementById('saveEquipmentBtn')?.addEventListener('click', saveEquipment);
 }
