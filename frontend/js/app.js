@@ -1,307 +1,320 @@
-const API_URL = 'http://localhost:3000/api';
+const API_URL = 'http://localhost:3000';
+let token = localStorage.getItem('token');
 let currentUser = null;
-let mediaRecorder = null;
-let audioChunks = [];
+let currentShiftId = null;
 
-// Check authentication
-function checkAuth() {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    
-    if (!token || !userStr) {
-        window.location.href = 'login.html';
-        return;
-    }
-    
-    currentUser = JSON.parse(userStr);
-    initApp();
-}
+if (!token) window.location.href = 'login.html';
 
-// Initialize app
-function initApp() {
-    document.getElementById('userInfo').textContent = `${currentUser.full_name} (${currentUser.role === 'admin' ? 'Админ' : 'Инженер'})`;
-    
-    // Show admin elements
-    if (currentUser.role === 'admin') {
-        document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
-    }
-    
-    // Logout
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-        localStorage.clear();
-        window.location.href = 'login.html';
-    });
-    
-    // Navigation
-    document.querySelectorAll('[data-section]').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const section = e.target.dataset.section;
-            showSection(section);
-            
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-            e.target.classList.add('active');
-        });
-    });
-    
-    // Modal handlers
-    setupModals();
-    
-    // Load initial data
-    loadShifts();
-}
+// Init
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadCurrentUser();
+    await loadShifts();
+    await loadEquipment();
+    setupEventListeners();
+});
 
-// Show section
-function showSection(section) {
-    document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
-    document.getElementById(`${section}Section`).style.display = 'block';
-    
-    if (section === 'shifts') loadShifts();
-    if (section === 'reports') loadReports();
-    if (section === 'users') loadUsers();
-}
-
-// API request helper
-async function apiRequest(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-    const headers = {
-        'Authorization': `Bearer ${token}`,
-        ...options.headers
-    };
-    
-    if (!(options.body instanceof FormData)) {
-        headers['Content-Type'] = 'application/json';
-    }
-    
-    const response = await fetch(`${API_URL}${endpoint}`, {
-        ...options,
-        headers
-    });
-    
-    if (response.status === 401 || response.status === 403) {
-        localStorage.clear();
-        window.location.href = 'login.html';
-        return;
-    }
-    
-    return response.json();
-}
-
-// Load shifts
-async function loadShifts() {
-    const shifts = await apiRequest('/shifts');
-    const container = document.getElementById('shiftsTable');
-    
-    if (!shifts || shifts.length === 0) {
-        container.innerHTML = '<p>Нет смен</p>';
-        return;
-    }
-    
-    let html = '<table class="table table-striped"><thead><tr><th>Инженер</th><th>Начало</th><th>Конец</th><th>Описание</th>';
-    if (currentUser.role === 'admin') html += '<th>Действия</th>';
-    html += '</tr></thead><tbody>';
-    
-    shifts.forEach(shift => {
-        html += `<tr>
-            <td>${shift.full_name || shift.username}</td>
-            <td>${new Date(shift.start_time).toLocaleString('ru-RU')}</td>
-            <td>${new Date(shift.end_time).toLocaleString('ru-RU')}</td>
-            <td>${shift.description || '-'}</td>`;
-        if (currentUser.role === 'admin') {
-            html += `<td><button class="btn btn-sm btn-danger" onclick="deleteShift(${shift.id})">Удалить</button></td>`;
-        }
-        html += '</tr>';
-    });
-    
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-// Load reports
-async function loadReports() {
-    const reports = await apiRequest('/reports');
-    const container = document.getElementById('reportsTable');
-    
-    if (!reports || reports.length === 0) {
-        container.innerHTML = '<p>Нет отчётов</p>';
-        return;
-    }
-    
-    let html = '<table class="table table-striped"><thead><tr><th>Инженер</th><th>Оборудование</th><th>Статус</th><th>Описание</th><th>Аудио</th><th>Дата</th></tr></thead><tbody>';
-    
-    reports.forEach(report => {
-        const statusClass = `status-${report.status}`;
-        const statusText = {
-            'working': 'Исправно',
-            'faulty': 'Неисправно',
-            'maintenance': 'Обслуживание'
-        }[report.status];
-        
-        html += `<tr>
-            <td>${report.full_name || report.username}</td>
-            <td>${report.equipment_id}</td>
-            <td><span class="badge ${statusClass}">${statusText}</span></td>
-            <td>${report.description || '-'}</td>
-            <td>${report.audio_file ? '✅ Есть' : '-'}</td>
-            <td>${new Date(report.created_at).toLocaleString('ru-RU')}</td>
-        </tr>`;
-    });
-    
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-// Load users (admin only)
-async function loadUsers() {
-    const users = await apiRequest('/users');
-    const container = document.getElementById('usersTable');
-    
-    if (!users || users.length === 0) {
-        container.innerHTML = '<p>Нет пользователей</p>';
-        return;
-    }
-    
-    let html = '<table class="table table-striped"><thead><tr><th>ID</th><th>Логин</th><th>Имя</th><th>Роль</th><th>Дата создания</th></tr></thead><tbody>';
-    
-    users.forEach(user => {
-        html += `<tr>
-            <td>${user.id}</td>
-            <td>${user.username}</td>
-            <td>${user.full_name || '-'}</td>
-            <td>${user.role === 'admin' ? 'Администратор' : 'Инженер'}</td>
-            <td>${new Date(user.created_at).toLocaleString('ru-RU')}</td>
-        </tr>`;
-    });
-    
-    html += '</tbody></table>';
-    container.innerHTML = html;
-}
-
-// Setup modals
-function setupModals() {
-    // Add shift button
-    document.getElementById('addShiftBtn')?.addEventListener('click', async () => {
-        const users = await apiRequest('/users');
-        const select = document.getElementById('shiftUserId');
-        select.innerHTML = users.filter(u => u.role === 'engineer')
-            .map(u => `<option value="${u.id}">${u.full_name || u.username}</option>`).join('');
-        
-        new bootstrap.Modal(document.getElementById('shiftModal')).show();
-    });
-    
-    // Save shift
-    document.getElementById('saveShiftBtn')?.addEventListener('click', async () => {
-        const data = {
-            user_id: document.getElementById('shiftUserId').value,
-            start_time: document.getElementById('shiftStartTime').value,
-            end_time: document.getElementById('shiftEndTime').value,
-            description: document.getElementById('shiftDescription').value
-        };
-        
-        await apiRequest('/shifts', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-        
-        bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
-        loadShifts();
-    });
-    
-    // Add report button
-    document.getElementById('addReportBtn').addEventListener('click', () => {
-        new bootstrap.Modal(document.getElementById('reportModal')).show();
-    });
-    
-    // Save report
-    document.getElementById('saveReportBtn').addEventListener('click', async () => {
-        const data = {
-            equipment_id: document.getElementById('equipmentId').value,
-            status: document.getElementById('reportStatus').value,
-            description: document.getElementById('reportDescription').value
-        };
-        
-        await apiRequest('/reports', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-        
-        bootstrap.Modal.getInstance(document.getElementById('reportModal')).hide();
-        loadReports();
-    });
-    
-    // Audio report
-    document.getElementById('addAudioReportBtn').addEventListener('click', () => {
-        new bootstrap.Modal(document.getElementById('audioReportModal')).show();
-    });
-    
-    // Recording
-    document.getElementById('recordBtn').addEventListener('click', startRecording);
-    document.getElementById('stopRecordBtn').addEventListener('click', stopRecording);
-    
-    // Save audio report
-    document.getElementById('saveAudioReportBtn').addEventListener('click', saveAudioReport);
-}
-
-// Audio recording
-async function startRecording() {
+async function loadCurrentUser() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
-        
-        mediaRecorder.addEventListener('dataavailable', event => {
-            audioChunks.push(event.data);
+        const res = await fetch(`${API_URL}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
         });
-        
-        mediaRecorder.start();
-        document.getElementById('recordBtn').disabled = true;
-        document.getElementById('stopRecordBtn').disabled = false;
-        document.getElementById('recordingStatus').textContent = 'Запись...';
+        if (!res.ok) throw new Error();
+        currentUser = await res.json();
+        document.getElementById('userInfo').textContent = `${currentUser.full_name || currentUser.username} (${currentUser.role === 'admin' ? 'Админ' : 'Инженер'})`;
+        if (currentUser.role === 'admin') {
+            document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'inline-block');
+            await loadUsers();
+        }
     } catch (error) {
-        alert('Ошибка доступа к микрофону');
-        console.error(error);
+        localStorage.removeItem('token');
+        window.location.href = 'login.html';
     }
 }
 
-function stopRecording() {
-    mediaRecorder.stop();
-    mediaRecorder.stream.getTracks().forEach(track => track.stop());
-    document.getElementById('recordBtn').disabled = false;
-    document.getElementById('stopRecordBtn').disabled = true;
-    document.getElementById('recordingStatus').textContent = 'Запись завершена';
+async function loadShifts() {
+    try {
+        const res = await fetch(`${API_URL}/api/shifts`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const shifts = await res.json();
+        displayShifts(shifts);
+    } catch (error) {
+        alert('Ошибка загрузки смен');
+    }
 }
 
-async function saveAudioReport() {
-    if (audioChunks.length === 0) {
-        alert('Сначала сделайте запись');
+function displayShifts(shifts) {
+    const container = document.getElementById('shiftsContainer');
+    if (shifts.length === 0) {
+        container.innerHTML = '<div class="col-12"><div class="alert alert-info">Смен не найдено</div></div>';
+        return;
+    }
+    container.innerHTML = shifts.map(shift => {
+        const start = new Date(shift.start_time).toLocaleString('ru-RU');
+        const end = new Date(shift.end_time).toLocaleString('ru-RU');
+        const hasReport = shift.has_report > 0;
+        return `
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card shift-card ${hasReport ? 'has-report' : 'no-report'}" onclick="viewShift(${shift.id})">
+                    ${hasReport ? '<span class="badge bg-success badge-report"><i class="bi bi-check-circle"></i> Отчет есть</span>' : '<span class="badge bg-warning badge-report"><i class="bi bi-exclamation-circle"></i> Нет отчета</span>'}
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-person-badge"></i> ${shift.full_name || shift.username}</h5>
+                        <p class="card-text">
+                            <small class="text-muted">
+                                <i class="bi bi-clock"></i> ${start}<br>
+                                <i class="bi bi-clock-fill"></i> ${end}
+                            </small>
+                        </p>
+                        ${shift.description ? `<p class="card-text"><i class="bi bi-info-circle"></i> ${shift.description}</p>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function viewShift(shiftId) {
+    currentShiftId = shiftId;
+    try {
+        const [shiftRes, reportRes] = await Promise.all([
+            fetch(`${API_URL}/api/shifts/${shiftId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+            fetch(`${API_URL}/api/shifts/${shiftId}/report`, { headers: { 'Authorization': `Bearer ${token}` } })
+        ]);
+        
+        const shift = await shiftRes.json();
+        const hasReport = reportRes.ok;
+        const report = hasReport ? await reportRes.json() : null;
+        
+        displayShiftDetails(shift, report, hasReport);
+        new bootstrap.Modal(document.getElementById('shiftModal')).show();
+    } catch (error) {
+        alert('Ошибка загрузки данных');
+    }
+}
+
+function displayShiftDetails(shift, report, hasReport) {
+    const start = new Date(shift.start_time).toLocaleString('ru-RU');
+    const end = new Date(shift.end_time).toLocaleString('ru-RU');
+    
+    document.getElementById('shiftDetails').innerHTML = `
+        <div class="mb-3">
+            <h6><i class="bi bi-person-badge"></i> Инженер:</h6>
+            <p>${shift.full_name || shift.username}</p>
+        </div>
+        <div class="mb-3">
+            <h6><i class="bi bi-clock"></i> Время смены:</h6>
+            <p>Начало: ${start}<br>Конец: ${end}</p>
+        </div>
+        ${shift.description ? `<div class="mb-3"><h6><i class="bi bi-info-circle"></i> Описание:</h6><p>${shift.description}</p></div>` : ''}
+    `;
+    
+    const reportSection = document.getElementById('reportSection');
+    if (hasReport) {
+        displayReport(report);
+    } else {
+        const canCreate = currentUser.role === 'admin' || shift.user_id === currentUser.id;
+        reportSection.innerHTML = canCreate
+            ? `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> Отчет еще не создан</div>
+               <button class="btn btn-success" onclick="openCreateReport()"><i class="bi bi-file-earmark-plus"></i> Создать отчет</button>`
+            : `<div class="alert alert-info"><i class="bi bi-info-circle"></i> Отчет еще не создан инженером</div>`;
+    }
+}
+
+function displayReport(report) {
+    const statusBadge = report.status === 'working' ? 'success' : report.status === 'faulty' ? 'danger' : 'warning';
+    const statusText = report.status === 'working' ? 'Исправно' : report.status === 'faulty' ? 'Неисправно' : 'Обслуживание';
+    
+    let html = `
+        <div class="alert alert-success"><i class="bi bi-check-circle"></i> Отчет создан ${new Date(report.created_at).toLocaleString('ru-RU')}</div>
+        <div class="mb-3">
+            <h6><i class="bi bi-tools"></i> Оборудование:</h6>
+            <p>${report.equipment_name || report.equipment_id} <span class="badge bg-${statusBadge}">${statusText}</span></p>
+        </div>
+        <div class="mb-3">
+            <h6><i class="bi bi-text-left"></i> Описание:</h6>
+            <p>${report.description}</p>
+        </div>
+    `;
+    
+    if (report.audio_file) {
+        html += `
+            <div class="mb-3">
+                <h6><i class="bi bi-mic-fill"></i> Аудио отчет:</h6>
+                <audio controls class="w-100" src="${API_URL}/api/audio/${report.audio_file}"></audio>
+            </div>
+        `;
+    }
+    
+    if (report.photo_files && report.photo_files.length > 0) {
+        html += `
+            <div class="mb-3">
+                <h6><i class="bi bi-image-fill"></i> Фотографии (${report.photo_files.length}):</h6>
+                <div class="photo-gallery">
+                    ${report.photo_files.map(photo => 
+                        `<img src="${API_URL}/api/photos/${photo}" alt="Photo" onclick="viewPhoto('${API_URL}/api/photos/${photo}')">`
+                    ).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    if (currentUser.role === 'admin') {
+        html += `<button class="btn btn-danger mt-2" onclick="deleteReport(${report.id})"><i class="bi bi-trash"></i> Удалить отчет</button>`;
+    }
+    
+    document.getElementById('reportSection').innerHTML = html;
+}
+
+function openCreateReport() {
+    document.getElementById('reportShiftId').value = currentShiftId;
+    bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
+    new bootstrap.Modal(document.getElementById('createReportModal')).show();
+}
+
+async function createReport() {
+    const shiftId = document.getElementById('reportShiftId').value;
+    const equipmentId = document.getElementById('reportEquipment').value;
+    const status = document.getElementById('reportStatus').value;
+    const description = document.getElementById('reportDescription').value;
+    const audioFile = document.getElementById('reportAudio').files[0];
+    const photoFiles = Array.from(document.getElementById('reportPhotos').files);
+    
+    if (!equipmentId || !status || !description) {
+        alert('Заполните все обязательные поля');
         return;
     }
     
-    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+    if (photoFiles.length > 5) {
+        alert('Можно загрузить максимум 5 фотографий');
+        return;
+    }
+    
     const formData = new FormData();
-    formData.append('audio', audioBlob, 'report.webm');
-    formData.append('equipment_id', document.getElementById('audioEquipmentId').value);
-    formData.append('status', document.getElementById('audioReportStatus').value);
-    formData.append('description', document.getElementById('audioReportDescription').value);
+    formData.append('shift_id', shiftId);
+    formData.append('equipment_id', equipmentId);
+    formData.append('status', status);
+    formData.append('description', description);
+    if (audioFile) formData.append('audio', audioFile);
+    photoFiles.forEach(photo => formData.append('photos', photo));
     
-    await apiRequest('/reports/audio', {
-        method: 'POST',
-        body: formData
-    });
-    
-    bootstrap.Modal.getInstance(document.getElementById('audioReportModal')).hide();
-    audioChunks = [];
-    document.getElementById('recordingStatus').textContent = '';
-    loadReports();
+    try {
+        const res = await fetch(`${API_URL}/api/reports/media`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData
+        });
+        
+        if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.error);
+        }
+        
+        alert('Отчет успешно создан!');
+        bootstrap.Modal.getInstance(document.getElementById('createReportModal')).hide();
+        document.getElementById('reportForm').reset();
+        await loadShifts();
+        await viewShift(shiftId);
+    } catch (error) {
+        alert(`Ошибка: ${error.message}`);
+    }
 }
 
-// Delete shift
-window.deleteShift = async function(id) {
-    if (confirm('Удалить смену?')) {
-        await apiRequest(`/shifts/${id}`, { method: 'DELETE' });
-        loadShifts();
+async function deleteReport(reportId) {
+    if (!confirm('Удалить отчет?')) return;
+    
+    try {
+        await fetch(`${API_URL}/api/reports/${reportId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        alert('Отчет удален');
+        bootstrap.Modal.getInstance(document.getElementById('shiftModal')).hide();
+        await loadShifts();
+    } catch (error) {
+        alert('Ошибка удаления');
     }
-};
+}
 
-// Init on load
-checkAuth();
+function viewPhoto(photoUrl) {
+    document.getElementById('photoModalImage').src = photoUrl;
+    new bootstrap.Modal(document.getElementById('photoModal')).show();
+}
+
+let equipment = [];
+async function loadEquipment() {
+    try {
+        const res = await fetch(`${API_URL}/api/equipment`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        equipment = await res.json();
+        const select = document.getElementById('reportEquipment');
+        select.innerHTML = '<option value="">Выберите...</option>' + 
+            equipment.map(eq => `<option value="${eq.equipment_id}">${eq.name} (${eq.equipment_id})</option>`).join('');
+    } catch (error) {
+        console.error('Error loading equipment:', error);
+    }
+}
+
+let users = [];
+async function loadUsers() {
+    try {
+        const res = await fetch(`${API_URL}/api/users`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        users = await res.json();
+        const select = document.getElementById('shiftUserId');
+        const engineers = users.filter(u => u.role === 'engineer');
+        select.innerHTML = engineers.map(u => `<option value="${u.id}">${u.full_name || u.username}</option>`).join('');
+    } catch (error) {
+        console.error('Error loading users:', error);
+    }
+}
+
+async function createShift() {
+    const userId = document.getElementById('shiftUserId').value;
+    const startTime = document.getElementById('shiftStartTime').value;
+    const endTime = document.getElementById('shiftEndTime').value;
+    const description = document.getElementById('shiftDescription').value;
+    
+    if (!userId || !startTime || !endTime) {
+        alert('Заполните все поля');
+        return;
+    }
+    
+    try {
+        await fetch(`${API_URL}/api/shifts`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user_id: userId,
+                start_time: startTime,
+                end_time: endTime,
+                description
+            })
+        });
+        alert('Смена создана');
+        bootstrap.Modal.getInstance(document.getElementById('addShiftModal')).hide();
+        document.getElementById('shiftForm').reset();
+        await loadShifts();
+    } catch (error) {
+        alert('Ошибка создания смены');
+    }
+}
+
+function setupEventListeners() {
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+        localStorage.removeItem('token');
+        window.location.href = 'login.html';
+    });
+    
+    document.getElementById('saveReportBtn').addEventListener('click', createReport);
+    
+    document.getElementById('addShiftBtn')?.addEventListener('click', () => {
+        new bootstrap.Modal(document.getElementById('addShiftModal')).show();
+    });
+    
+    document.getElementById('saveShiftBtn')?.addEventListener('click', createShift);
+}
