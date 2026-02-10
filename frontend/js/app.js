@@ -59,11 +59,16 @@ function displayShifts(shifts) {
         const start = formatDate(shift.start_time);
         const end = formatDate(shift.end_time);
         const hasReport = shift.has_report > 0;
+        const isMyShift = currentUser && shift.user_id === currentUser.id;
+        const ownerBadge = isMyShift 
+            ? '<span class="badge bg-primary me-1"><i class="bi bi-person-fill"></i> Моя смена</span>' 
+            : '<span class="badge bg-secondary me-1"><i class="bi bi-person"></i> Чужая смена</span>';
         return `
             <div class="col-md-6 col-lg-4 mb-3">
                 <div class="card shift-card ${hasReport ? 'has-report' : 'no-report'}" onclick="viewShift(${shift.id})">
                     ${hasReport ? '<span class="badge bg-success badge-report"><i class="bi bi-check-circle"></i> Отчет есть</span>' : '<span class="badge bg-warning badge-report"><i class="bi bi-exclamation-circle"></i> Нет отчета</span>'}
                     <div class="card-body">
+                        <div class="mb-2">${ownerBadge}</div>
                         <h5 class="card-title"><i class="bi bi-person-badge"></i> ${shift.full_name || shift.username}</h5>
                         <p class="card-text"><small class="text-muted"><i class="bi bi-clock"></i> ${start}<br><i class="bi bi-clock-fill"></i> ${end}</small></p>
                         ${shift.description ? `<p class="card-text"><i class="bi bi-info-circle"></i> ${shift.description}</p>` : ''}
@@ -73,6 +78,7 @@ function displayShifts(shifts) {
         `;
     }).join('');
 }
+
 
 async function viewShift(shiftId) {
     currentShiftId = shiftId;
