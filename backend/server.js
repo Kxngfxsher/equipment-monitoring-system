@@ -27,7 +27,25 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 const db = new sqlite3.Database('./equipment_monitoring.db', (err) => {
   if (err) console.error('Error opening database:', err.message);
-  else { console.log('Connected to SQLite database.'); initDatabase(); }
+  else { console.log('Connected to SQLite database.');
+  // Миграции users: phone, position, user_status
+  db.run("ALTER TABLE users ADD COLUMN phone TEXT", (err) => {
+    if (!err) console.log('✅ Migration: phone added to users');
+  });
+  db.run("ALTER TABLE users ADD COLUMN position TEXT", (err) => {
+    if (!err) console.log('✅ Migration: position added to users');
+  });
+  db.run("ALTER TABLE users ADD COLUMN user_status TEXT DEFAULT 'active'", (err) => {
+    if (!err) console.log('✅ Migration: user_status added to users');
+  });
+  // Миграция: добавляем is_deleted если нет
+  db.run("ALTER TABLE equipment ADD COLUMN is_deleted INTEGER DEFAULT 0", (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('Migration error:', err.message);
+    } else if (!err) {
+      console.log('✅ Migration: is_deleted column added to equipment');
+    }
+  }); initDatabase(); }
 });
 
 function initDatabase() {
@@ -35,7 +53,8 @@ function initDatabase() {
     db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'engineer')), first_name TEXT, last_name TEXT,
-      full_name TEXT, email TEXT, description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      full_name TEXT, email TEXT, phone TEXT, position TEXT, user_status TEXT DEFAULT 'active',
+      description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS shifts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, start_time DATETIME NOT NULL,
@@ -44,7 +63,7 @@ function initDatabase() {
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS equipment (
       id INTEGER PRIMARY KEY AUTOINCREMENT, equipment_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-      type TEXT, location TEXT, status TEXT DEFAULT 'working', description TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      type TEXT, location TEXT, status TEXT DEFAULT 'working', description TEXT, is_deleted INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER NOT NULL UNIQUE, user_id INTEGER NOT NULL,
@@ -102,18 +121,18 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
 });
 
 app.get('/api/users', authenticateToken, (req, res) => {
-  db.all('SELECT id, username, role, first_name, last_name, full_name, email, description, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
+  db.all('SELECT id, username, role, first_name, last_name, full_name, email, phone, position, user_status, description, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
 });
 
 app.post('/api/users', authenticateToken, isAdmin, (req, res) => {
-  const { username, password, role, first_name, last_name, email, description } = req.body;
+  const { username, password, role, first_name, last_name, email, phone, position, user_status, description } = req.body;
   if (!username || !password || !role) return res.status(400).json({ error: 'Username, password and role are required' });
   const full_name = `${first_name || ''} ${last_name || ''}`.trim();
   const hashedPassword = bcrypt.hashSync(password, 10);
-  db.run('INSERT INTO users (username, password, role, first_name, last_name, full_name, email, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  db.run('INSERT INTO users (username, password, role, first_name, last_name, full_name, email, phone, position, user_status, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [username, hashedPassword, role, first_name, last_name, full_name, email, description],
     function(err) {
       if (err) {
@@ -125,7 +144,7 @@ app.post('/api/users', authenticateToken, isAdmin, (req, res) => {
 });
 
 app.put('/api/users/:id', authenticateToken, isAdmin, (req, res) => {
-  const { username, password, role, first_name, last_name, email, description } = req.body;
+  const { username, password, role, first_name, last_name, email, phone, position, user_status, description } = req.body;
   const full_name = `${first_name || ''} ${last_name || ''}`.trim();
   let query, params;
   if (password) {
@@ -159,9 +178,8 @@ app.get('/api/equipment', authenticateToken, (req, res) => {
 
 app.get('/api/equipment/latest-status', authenticateToken, (req, res) => {
   db.all(`SELECT e.equipment_id, e.name, e.type, e.location,
-    COALESCE((SELECT er.status FROM equipment_reports er WHERE er.equipment_id = e.equipment_id ORDER BY er.created_at DESC LIMIT 1), 'working') as last_status,
-    COALESCE((SELECT er.description FROM equipment_reports er WHERE er.equipment_id = e.equipment_id ORDER BY er.created_at DESC LIMIT 1), '') as last_description
-    FROM equipment e ORDER BY e.created_at ASC`, [], (err, rows) => {
+    COALESCE((SELECT er.status FROM equipment_reports er WHERE er.equipment_id = e.equipment_id ORDER BY er.created_at DESC LIMIT 1), 'working') as last_status
+    FROM equipment e WHERE e.is_deleted = 0 ORDER BY e.created_at ASC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
@@ -178,9 +196,44 @@ app.post('/api/equipment', authenticateToken, isAdmin, (req, res) => {
 });
 
 app.delete('/api/equipment/:id', authenticateToken, isAdmin, (req, res) => {
-  db.run('DELETE FROM equipment WHERE id = ?', [req.params.id], function(err) {
+  db.run('UPDATE equipment SET is_deleted = 1 WHERE id = ?', [req.params.id], function(err) {
     if (err) return res.status(500).json({ error: 'Failed to delete equipment' });
-    res.json({ message: 'Equipment deleted successfully' });
+    res.json({ message: 'Equipment archived successfully' });
+  });
+});
+
+
+// История отчётов по оборудованию
+app.get('/api/equipment/:equipmentId/history', authenticateToken, (req, res) => {
+  const equipmentId = req.params.equipmentId;
+  db.all(`SELECT er.*, r.shift_id, r.created_at as report_date,
+    s.start_time, s.end_time,
+    u.username, u.full_name
+    FROM equipment_reports er
+    JOIN reports r ON er.report_id = r.id
+    JOIN shifts s ON r.shift_id = s.id
+    JOIN users u ON s.user_id = u.id
+    WHERE er.equipment_id = ?
+    ORDER BY r.created_at DESC`, [equipmentId], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(rows);
+  });
+});
+
+// Получить оборудование включая удалённое (для админа)
+app.get('/api/equipment/all-with-deleted', authenticateToken, isAdmin, (req, res) => {
+  db.all('SELECT * FROM equipment ORDER BY is_deleted ASC, created_at ASC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(rows);
+  });
+});
+
+
+// Восстановить оборудование из архива
+app.patch('/api/equipment/:id/restore', authenticateToken, isAdmin, (req, res) => {
+  db.run('UPDATE equipment SET is_deleted = 0 WHERE id = ?', [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: 'Failed to restore equipment' });
+    res.json({ message: 'Equipment restored successfully' });
   });
 });
 

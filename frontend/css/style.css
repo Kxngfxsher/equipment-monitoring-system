@@ -66,3 +66,51 @@ table {
         font-size: 0.9em;
     }
 }
+
+/* === Вкладки смен === */
+#shiftTabs .nav-link {
+    border-radius: 20px;
+    padding: 8px 20px;
+    margin-right: 8px;
+    font-weight: 500;
+    color: #495057;
+    background: #e9ecef;
+    border: none;
+    transition: all 0.2s;
+}
+#shiftTabs .nav-link.active {
+    background: #0d6efd;
+    color: white;
+    box-shadow: 0 2px 8px rgba(13, 110, 253, 0.3);
+}
+#shiftTabs .nav-link:hover:not(.active) {
+    background: #dee2e6;
+}
+
+/* Секции-шторки */
+.section-header {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s;
+}
+.section-header:hover {
+    opacity: 0.9;
+}
+
+/* Мобильная адаптация */
+@media (max-width: 576px) {
+    #shiftTabs .nav-link {
+        padding: 6px 14px;
+        font-size: 0.9rem;
+        margin-right: 4px;
+    }
+    #shiftTabs {
+        justify-content: center;
+    }
+    .shift-card .card-body {
+        padding: 0.75rem;
+    }
+    .shift-card .card-title {
+        font-size: 1rem;
+    }
+}

@@ -35,10 +35,32 @@
 
     <div class="container mt-4">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2><i class="bi bi-calendar3"></i> Все смены</h2>
+            <h2><i class="bi bi-calendar3"></i> Смены</h2>
             <button class="btn btn-success admin-only" id="addShiftBtn" style="display: none;"><i class="bi bi-plus-circle"></i> Добавить смену</button>
         </div>
-        <div id="shiftsContainer" class="row"></div>
+        
+        <!-- Вкладки Мои/Все -->
+        <ul class="nav nav-pills mb-3" id="shiftTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="my-shifts-tab" data-bs-toggle="pill" data-bs-target="#my-shifts" type="button" role="tab" aria-selected="true">
+                    <i class="bi bi-person-fill"></i> Мои смены
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="all-shifts-tab" data-bs-toggle="pill" data-bs-target="#all-shifts" type="button" role="tab" aria-selected="false">
+                    <i class="bi bi-people-fill"></i> Все смены
+                </button>
+            </li>
+        </ul>
+        
+        <div class="tab-content" id="shiftTabsContent">
+            <div class="tab-pane fade show active" id="my-shifts" role="tabpanel">
+                <div id="myShiftsContainer" class="row"></div>
+            </div>
+            <div class="tab-pane fade" id="all-shifts" role="tabpanel">
+                <div id="allShiftsContainer" class="row"></div>
+            </div>
+        </div>
     </div>
 
     <div class="modal fade" id="shiftModal" tabindex="-1">
@@ -152,50 +174,75 @@
     </div>
 
     <div class="modal fade" id="addUserModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Добавить пользователя</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="userModalTitle"><i class="bi bi-person-plus"></i> Добавить пользователя</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <form id="userForm">
-                        <div class="mb-3">
-                            <label class="form-label">Логин *</label>
-                            <input type="text" class="form-control" id="userUsername" required>
+                        <input type="hidden" id="editUserId">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Логин *</label>
+                                <input type="text" class="form-control" id="userUsername" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" id="userPasswordLabel">Пароль *</label>
+                                <input type="password" class="form-control" id="userPassword">
+                                <small class="text-muted" id="passwordHint" style="display:none">Оставьте пустым, чтобы не менять</small>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Имя *</label>
+                                <input type="text" class="form-control" id="userFirstName" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Фамилия *</label>
+                                <input type="text" class="form-control" id="userLastName" required>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Роль *</label>
+                                <select class="form-control" id="userRole" required>
+                                    <option value="engineer">Инженер</option>
+                                    <option value="admin">Администратор</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Статус</label>
+                                <select class="form-control" id="userStatus">
+                                    <option value="active">Работает</option>
+                                    <option value="inactive">Не работает</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Должность</label>
+                                <input type="text" class="form-control" id="userPosition" placeholder="Например: Инженер КИПиА">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Телефон</label>
+                                <input type="tel" class="form-control" id="userPhone" placeholder="+7 (___) ___-__-__">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Email</label>
+                                <input type="email" class="form-control" id="userEmail">
+                            </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Пароль *</label>
-                            <input type="password" class="form-control" id="userPassword" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Роль *</label>
-                            <select class="form-control" id="userRole" required>
-                                <option value="engineer">Инженер</option>
-                                <option value="admin">Администратор</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Имя</label>
-                            <input type="text" class="form-control" id="userFirstName">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Фамилия</label>
-                            <input type="text" class="form-control" id="userLastName">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Email</label>
-                            <input type="email" class="form-control" id="userEmail">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Описание</label>
-                            <textarea class="form-control" id="userDescription" rows="2"></textarea>
+                            <label class="form-label">Примечание</label>
+                            <textarea class="form-control" id="userDescription" rows="2" placeholder="Дополнительная информация..."></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="button" class="btn btn-primary" id="saveUserBtn">Сохранить</button>
+                    <button type="button" class="btn btn-primary" id="saveUserBtn"><i class="bi bi-check-circle"></i> Сохранить</button>
                 </div>
             </div>
         </div>
@@ -268,5 +315,59 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/app.js"></script>
+
+    <!-- Модалка истории оборудования -->
+    <div class="modal fade" id="equipmentHistoryModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="bi bi-clock-history"></i> История оборудования</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <h6 id="historyEquipmentName" class="mb-3"></h6>
+                    <div id="equipmentHistoryContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Модалка редактирования оборудования -->
+    <div class="modal fade" id="editEquipmentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title"><i class="bi bi-pencil"></i> Редактировать оборудование</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editEquipmentForm">
+                        <input type="hidden" id="editEqId">
+                        <div class="mb-3">
+                            <label class="form-label">ID оборудования *</label>
+                            <input type="text" class="form-control" id="editEqEquipmentId" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Название *</label>
+                            <input type="text" class="form-control" id="editEqName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Тип</label>
+                            <input type="text" class="form-control" id="editEqType">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Расположение</label>
+                            <input type="text" class="form-control" id="editEqLocation">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-warning" id="saveEditEquipmentBtn"><i class="bi bi-check-circle"></i> Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
