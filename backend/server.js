@@ -185,11 +185,12 @@ app.delete('/api/equipment/:id', authenticateToken, isAdmin, (req, res) => {
 });
 
 app.get('/api/shifts', authenticateToken, (req, res) => {
-  let query = req.user.role === 'admin'
-    ? `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report FROM shifts s JOIN users u ON s.user_id = u.id ORDER BY s.start_time DESC`
-    : `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report FROM shifts s JOIN users u ON s.user_id = u.id WHERE s.user_id = ? ORDER BY s.start_time DESC`;
-  let params = req.user.role === 'admin' ? [] : [req.user.id];
-  db.all(query, params, (err, rows) => {
+  // Все пользователи видят все смены
+  const query = `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, 
+    (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report 
+    FROM shifts s JOIN users u ON s.user_id = u.id 
+    ORDER BY s.start_time DESC`;
+  db.all(query, [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
