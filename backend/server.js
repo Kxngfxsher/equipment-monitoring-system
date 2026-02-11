@@ -256,7 +256,7 @@ app.get('/api/shifts', authenticateToken, (req, res) => {
     const shiftIds = rows.map(r => r.id);
     if (shiftIds.length === 0) return res.json([]);
     const placeholders = shiftIds.map(() => '?').join(',');
-    db.all(`SELECT su.shift_id, u.id as user_id, u.username, u.first_name, u.last_name, u.full_name 
+    db.all(`SELECT su.shift_id, u.id, u.id as user_id, u.username, u.first_name, u.last_name, u.full_name 
       FROM shift_users su JOIN users u ON su.user_id = u.id 
       WHERE su.shift_id IN (${placeholders})`, shiftIds, (err2, userRows) => {
       if (err2) return res.status(500).json({ error: 'Database error' });
@@ -285,7 +285,7 @@ app.get('/api/shifts/:id', authenticateToken, (req, res) => {
   db.get(`SELECT s.* FROM shifts s WHERE s.id = ?`, [req.params.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (!row) return res.status(404).json({ error: 'Shift not found' });
-    db.all(`SELECT u.id as user_id, u.username, u.first_name, u.last_name, u.full_name 
+    db.all(`SELECT u.id, u.id as user_id, u.username, u.first_name, u.last_name, u.full_name 
       FROM shift_users su JOIN users u ON su.user_id = u.id WHERE su.shift_id = ?`, [row.id], (err2, users) => {
       if (err2) return res.status(500).json({ error: 'Database error' });
       row.users = users;
