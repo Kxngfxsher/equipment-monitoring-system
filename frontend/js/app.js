@@ -413,20 +413,36 @@ async function loadEquipment() {
 }
 
 async function openEquipmentModal() {
-    await loadEquipment();
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    if (isAdminUser) {
+        // Админ видит всё включая удалённое
+        try {
+            const res = await fetch(`${API_URL}/api/equipment/all-with-deleted`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (res.ok) equipment = await res.json();
+            else await loadEquipment();
+        } catch(e) { await loadEquipment(); }
+    } else {
+        await loadEquipment();
+    }
     displayEquipmentList();
     new bootstrap.Modal(document.getElementById('equipmentModal')).show();
 }
 
 function displayEquipmentList() {
     const container = document.getElementById('equipmentList');
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    
+    // Скрываем/показываем кнопку добавления
+    const addBtn = document.getElementById('addEquipmentBtn');
+    if (addBtn) addBtn.style.display = isAdminUser ? '' : 'none';
+    
     if (equipment.length === 0) {
         container.innerHTML = '<div class="alert alert-info">Оборудование не добавлено</div>';
         return;
     }
 
     const active = equipment.filter(eq => !eq.is_deleted);
-    const archived = equipment.filter(eq => eq.is_deleted);
+    const archived = isAdminUser ? equipment.filter(eq => eq.is_deleted) : [];
 
     let html = `
         <ul class="nav nav-tabs mb-3" role="tablist">
@@ -457,6 +473,7 @@ function displayEquipmentList() {
 }
 
 function buildEquipmentTable(items, isArchive) {
+    const isAdminUser = currentUser && currentUser.role === 'admin';
     return `
         <div class="table-responsive">
         <table class="table table-striped table-hover">
@@ -476,7 +493,7 @@ function buildEquipmentTable(items, isArchive) {
                                 <button class="btn btn-outline-info" onclick="viewEquipmentHistory('${eq.equipment_id}', '${eq.name}')" title="История">
                                     <i class="bi bi-clock-history"></i>
                                 </button>
-                                ${isArchive ? `
+                                ${isAdminUser ? (isArchive ? `
                                     <button class="btn btn-outline-success" onclick="restoreEquipment(${eq.id})" title="Восстановить">
                                         <i class="bi bi-arrow-counterclockwise"></i>
                                     </button>
@@ -484,7 +501,7 @@ function buildEquipmentTable(items, isArchive) {
                                     <button class="btn btn-outline-danger" onclick="deleteEquipment(${eq.id})" title="В архив">
                                         <i class="bi bi-trash"></i>
                                     </button>
-                                `}
+                                `) : ''}
                             </div>
                         </td>
                     </tr>

@@ -212,14 +212,13 @@ app.delete('/api/equipment/:id', authenticateToken, isAdmin, (req, res) => {
 // История отчётов по оборудованию
 app.get('/api/equipment/:equipmentId/history', authenticateToken, (req, res) => {
   const equipmentId = req.params.equipmentId;
-  db.all(`SELECT er.*, r.shift_id, r.created_at as report_date,
+  db.all(`SELECT er.*, r.shift_id, r.user_id, r.created_at as report_date,
     s.start_time, s.end_time,
     u.username, u.full_name
     FROM equipment_reports er
     JOIN reports r ON er.report_id = r.id
     JOIN shifts s ON r.shift_id = s.id
-    JOIN shift_users su ON su.shift_id = s.id
-    JOIN users u ON su.user_id = u.id
+    JOIN users u ON r.user_id = u.id
     WHERE er.equipment_id = ?
     ORDER BY s.start_time DESC`, [equipmentId], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
