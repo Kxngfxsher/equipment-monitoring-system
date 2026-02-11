@@ -372,7 +372,32 @@ async function deleteShift(shiftId) {
 
 function viewPhoto(photoUrl) {
     document.getElementById('photoModalImage').src = photoUrl;
-    new bootstrap.Modal(document.getElementById('photoModal')).show();
+    const photoModalEl = document.getElementById('photoModal');
+    let photoModal = bootstrap.Modal.getInstance(photoModalEl);
+    if (!photoModal) {
+        photoModal = new bootstrap.Modal(photoModalEl, { backdrop: false });
+    }
+    photoModal.show();
+    // Поднимаем поверх всех модалок
+    setTimeout(() => {
+        photoModalEl.style.zIndex = '1090';
+        // Затемняем фон
+        let overlay = document.getElementById('photoOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'photoOverlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1085';
+            overlay.onclick = () => { photoModal.hide(); };
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'block';
+    }, 10);
+    // Убираем overlay при закрытии
+    photoModalEl.addEventListener('hidden.bs.modal', function handler() {
+        const overlay = document.getElementById('photoOverlay');
+        if (overlay) overlay.style.display = 'none';
+        photoModalEl.removeEventListener('hidden.bs.modal', handler);
+    });
 }
 
 // === Оборудование ===
@@ -779,34 +804,74 @@ async function viewEquipmentHistory(equipmentId, equipmentName) {
         if (history.length === 0) {
             container.innerHTML = '<div class="alert alert-info">Нет записей по этому оборудованию</div>';
         } else {
-            container.innerHTML = `
-                <div class="timeline">
-                    ${history.map(item => {
-                        const statusBadge = item.status === 'working' ? 'success' : item.status === 'faulty' ? 'danger' : 'warning';
-                        const statusText = item.status === 'working' ? 'Исправно' : item.status === 'faulty' ? 'Неисправно' : 'Обслуживание';
-                        const date = formatDate(item.report_date);
-                        const shiftDate = formatDate(item.start_time);
-                        return `
-                            <div class="card mb-2 border-start border-4 border-${statusBadge}">
-                                <div class="card-body py-2 px-3">
-                                    <div class="d-flex justify-content-between align-items-center">
-                                        <span class="badge bg-${statusBadge}">${statusText}</span>
-                                        <small class="text-muted">${date}</small>
-                                    </div>
-                                    <small class="text-muted d-block mt-1">
-                                        <i class="bi bi-person"></i> ${item.full_name || item.username} &bull;
-                                        <i class="bi bi-calendar"></i> Смена: ${shiftDate}
-                                    </small>
-                                    ${item.description ? '<p class="mb-0 mt-1 small">' + item.description + '</p>' : ''}
-                                    ${item.audio_file ? '<audio controls class="w-100 mt-1" style="height:32px" src="' + API_URL + '/api/audio/' + item.audio_file + '"></audio>' : ''}
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            `;
-        }
+            // Группируем по месяцам
+            const months = {};
+            const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+            history.forEach(item => {
+                const d = new Date(item.report_date || item.start_time);
+                const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+                const label = monthNames[d.getMonth()] + ' ' + d.getFullYear();
+                if (!months[key]) months[key] = { label, items: [] };
+                months[key].items.push(item);
+            });
 
+            const sortedKeys = Object.keys(months).sort().reverse();
+            let html = '';
+            sortedKeys.forEach((key, idx) => {
+                const group = months[key];
+                const collapseId = 'histMonth_' + key.replace('-','_');
+                const isFirst = idx === 0;
+                html += `
+                    <div class="mb-2">
+                        <button class="btn btn-outline-secondary w-100 d-flex justify-content-between align-items-center" 
+                                type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+                            <span><i class="bi bi-calendar3"></i> ${group.label}</span>
+                            <span class="badge bg-primary rounded-pill">${group.items.length}</span>
+                        </button>
+                        <div class="collapse ${isFirst ? 'show' : ''}" id="${collapseId}">
+                            <div class="mt-2">
+                                ${group.items.map(item => {
+                                    const statusBadge = item.status === 'working' ? 'success' : item.status === 'faulty' ? 'danger' : 'warning';
+                                    const statusText = item.status === 'working' ? 'Исправно' : item.status === 'faulty' ? 'Неисправно' : 'Обслуживание';
+                                    const date = formatDate(item.report_date);
+                                    const shiftDate = formatDate(item.start_time);
+                                    const photos = Array.isArray(item.photo_files) ? item.photo_files : [];
+                                    return `
+                                        <div class="card mb-2 border-start border-4 border-${statusBadge}">
+                                            <div class="card-body py-2 px-3">
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <span class="badge bg-${statusBadge}">${statusText}</span>
+                                                    <small class="text-muted">${date}</small>
+                                                </div>
+                                                <small class="text-muted d-block mt-1">
+                                                    <i class="bi bi-person"></i> ${item.full_name || item.username} &bull;
+                                                    <i class="bi bi-calendar"></i> Смена: ${shiftDate}
+                                                </small>
+                                                ${item.description ? '<p class="mb-0 mt-1 small">' + item.description + '</p>' : ''}
+                                                ${photos.length > 0 ? `
+                                                    <div class="d-flex flex-wrap gap-1 mt-2">
+                                                        ${photos.map(photo => `
+                                                            <img src="${API_URL}/api/photos/${photo}" 
+                                                                 class="rounded border" 
+                                                                 style="width:80px;height:80px;object-fit:cover;cursor:pointer" 
+                                                                 onclick="viewPhoto('${API_URL}/api/photos/${photo}')"
+                                                                 onerror="this.style.display='none'"
+                                                                 alt="Фото">
+                                                        `).join('')}
+                                                    </div>
+                                                ` : ''}
+                                                ${item.audio_file ? '<audio controls class="w-100 mt-1" style="height:32px" src="' + API_URL + '/api/audio/' + item.audio_file + '"></audio>' : ''}
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
         // Прячем модалку оборудования, показываем историю
         const eqModal = bootstrap.Modal.getInstance(document.getElementById('equipmentModal'));
         if (eqModal) eqModal.hide();

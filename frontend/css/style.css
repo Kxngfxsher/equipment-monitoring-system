@@ -114,3 +114,12 @@ table {
         font-size: 1rem;
     }
 }
+
+/* Фото-модалка поверх всех окон */
+#photoModal {
+    z-index: 1070 !important;
+}
+#photoModal .modal-backdrop,
+#photoModal + .modal-backdrop {
+    z-index: 1065 !important;
+}

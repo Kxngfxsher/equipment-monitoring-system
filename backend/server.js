@@ -216,6 +216,7 @@ app.get('/api/equipment/:equipmentId/history', authenticateToken, (req, res) => 
     WHERE er.equipment_id = ?
     ORDER BY r.created_at DESC`, [equipmentId], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
+    rows.forEach(row => { try { row.photo_files = JSON.parse(row.photo_files || '[]'); } catch(e) { row.photo_files = []; } });
     res.json(rows);
   });
 });
