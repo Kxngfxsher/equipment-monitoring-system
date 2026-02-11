@@ -46,7 +46,7 @@ async function loadShifts() {
         allShiftsData = await res.json();
         
         // Мои смены
-        const myShifts = allShiftsData.filter(s => currentUser && s.user_id === currentUser.id);
+        const myShifts = allShiftsData.filter(s => currentUser && s.users && s.users.some(u => u.id === currentUser.id));
         displayShiftsInContainer(myShifts, 'myShiftsContainer', true);
         
         // Все смены
@@ -142,11 +142,12 @@ function buildShiftCard(shift) {
     const start = formatDate(shift.start_time);
     const end = formatDate(shift.end_time);
     const hasReport = shift.has_report > 0;
-    const isMyShift = currentUser && shift.user_id === currentUser.id;
+    const isMyShift = currentUser && shift.users && shift.users.some(u => u.id === currentUser.id);
 
+    const usersNames = (shift.users && shift.users.length > 0) ? shift.users.map(u => u.full_name || u.username).join(', ') : (shift.full_name || shift.username);
     const ownerBadge = isMyShift
         ? '<span class="badge bg-primary me-1"><i class="bi bi-person-fill"></i> Моя</span>'
-        : '<span class="badge bg-secondary me-1"><i class="bi bi-person"></i> ' + (shift.full_name || shift.username) + '</span>';
+        : '<span class="badge bg-secondary me-1"><i class="bi bi-person"></i> ' + usersNames + '</span>';
 
     const reportBadge = hasReport
         ? '<span class="badge bg-success badge-report"><i class="bi bi-check-circle"></i> Отчёт есть</span>'
@@ -158,7 +159,7 @@ function buildShiftCard(shift) {
                 ${reportBadge}
                 <div class="card-body">
                     <div class="mb-2">${ownerBadge}</div>
-                    <h5 class="card-title"><i class="bi bi-person-badge"></i> ${shift.full_name || shift.username}</h5>
+                    <h5 class="card-title"><i class="bi bi-person-badge"></i> ${usersNames}</h5>
                     <p class="card-text">
                         <small class="text-muted">
                             <i class="bi bi-clock"></i> ${start}<br>
@@ -192,11 +193,11 @@ async function viewShift(shiftId) {
 function displayShiftDetails(shift, report, hasReport) {
     const start = formatDate(shift.start_time);
     const end = formatDate(shift.end_time);
-    const isMyShift = currentUser && shift.user_id === currentUser.id;
+    const isMyShift = currentUser && shift.users && shift.users.some(u => u.id === currentUser.id);
     const isAdmin = currentUser && currentUser.role === 'admin';
 
     document.getElementById('shiftDetails').innerHTML = `
-        <div class="mb-3"><h6><i class="bi bi-person-badge"></i> Инженер:</h6><p>${shift.full_name || shift.username}</p></div>
+        <div class="mb-3"><h6><i class="bi bi-person-badge"></i> Инженер:</h6><p>${(shift.users && shift.users.length > 0) ? shift.users.map(u => u.full_name || u.username).join(", ") : (shift.full_name || shift.username)}</p></div>
         <div class="mb-3"><h6><i class="bi bi-clock"></i> Время смены:</h6><p>Начало: ${start}<br>Конец: ${end}</p></div>
         ${shift.description ? `<div class="mb-3"><h6><i class="bi bi-info-circle"></i> Описание:</h6><p>${shift.description}</p></div>` : ''}
     `;
@@ -545,6 +546,8 @@ async function loadUsers() {
         if (select) {
             const engineers = users.filter(u => u.role === 'engineer');
             select.innerHTML = engineers.map(u => `<option value="${u.id}">${u.full_name || u.username}</option>`).join('');
+            select.setAttribute('multiple', 'true');
+            select.setAttribute('size', Math.min(engineers.length, 5));
         }
     } catch (error) {
         console.error('Error loading users:', error);
@@ -699,7 +702,7 @@ async function saveShift() {
         const res = await fetch(`${API_URL}/api/shifts`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, start_time: startTime, end_time: endTime, description })
+            body: JSON.stringify({ user_ids: Array.from(document.getElementById('shiftUserId').selectedOptions).map(o => parseInt(o.value)), start_time: startTime, end_time: endTime, description })
         });
         if (!res.ok) {
             const err = await res.json();
