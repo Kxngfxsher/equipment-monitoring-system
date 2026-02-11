@@ -1,34 +1,23 @@
-# Базы данных
+# Dependencies
+node_modules/
+
+# Database
 *.db
 *.sqlite
-*.sqlite3
-backend/*.db
 
-# Зависимости
-node_modules/
-backend/node_modules/
+# Uploads (user files)
+backend/uploads/audio-*
+backend/uploads/photos/*
+backend/uploads/tasks/*
+!backend/uploads/.gitkeep
 
-# Логи
-*.log
-npm-debug.log*
-
-# Переменные окружения (секреты)
-.env
-backend/.env
-
-# OS файлы
+# OS
 .DS_Store
 Thumbs.db
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Загруженные файлы (аудио, фото)
-backend/uploads/
-uploads/
-
-# Package lock (опционально, но для SQLite проекта не критично)
-backend/package-lock.json
+# Env
+.env
