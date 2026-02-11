@@ -178,7 +178,7 @@ app.get('/api/equipment', authenticateToken, (req, res) => {
 
 app.get('/api/equipment/latest-status', authenticateToken, (req, res) => {
   db.all(`SELECT e.equipment_id, e.name, e.type, e.location,
-    COALESCE((SELECT er.status FROM equipment_reports er WHERE er.equipment_id = e.equipment_id ORDER BY er.created_at DESC LIMIT 1), 'working') as last_status
+    COALESCE((SELECT er.status FROM equipment_reports er JOIN reports r ON er.report_id = r.id JOIN shifts s ON r.shift_id = s.id WHERE er.equipment_id = e.equipment_id AND date(s.start_time) <= date('now') ORDER BY s.start_time DESC LIMIT 1), 'working') as last_status
     FROM equipment e WHERE e.is_deleted = 0 ORDER BY e.created_at ASC`, [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
@@ -214,7 +214,7 @@ app.get('/api/equipment/:equipmentId/history', authenticateToken, (req, res) => 
     JOIN shifts s ON r.shift_id = s.id
     JOIN users u ON s.user_id = u.id
     WHERE er.equipment_id = ?
-    ORDER BY r.created_at DESC`, [equipmentId], (err, rows) => {
+    ORDER BY s.start_time DESC`, [equipmentId], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     rows.forEach(row => { try { row.photo_files = JSON.parse(row.photo_files || '[]'); } catch(e) { row.photo_files = []; } });
     res.json(rows);

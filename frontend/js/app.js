@@ -808,7 +808,7 @@ async function viewEquipmentHistory(equipmentId, equipmentName) {
             const months = {};
             const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
             history.forEach(item => {
-                const d = new Date(item.report_date || item.start_time);
+                const d = new Date(item.start_time);
                 const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
                 const label = monthNames[d.getMonth()] + ' ' + d.getFullYear();
                 if (!months[key]) months[key] = { label, items: [] };
