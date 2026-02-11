@@ -61,6 +61,12 @@ function initDatabase() {
       end_time DATETIME NOT NULL, description TEXT, location TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS shift_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, shift_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+      FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(shift_id, user_id)
+    )`);
     db.run(`CREATE TABLE IF NOT EXISTS equipment (
       id INTEGER PRIMARY KEY AUTOINCREMENT, equipment_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
       type TEXT, location TEXT, status TEXT DEFAULT 'working', description TEXT, is_deleted INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -212,7 +218,8 @@ app.get('/api/equipment/:equipmentId/history', authenticateToken, (req, res) => 
     FROM equipment_reports er
     JOIN reports r ON er.report_id = r.id
     JOIN shifts s ON r.shift_id = s.id
-    JOIN users u ON s.user_id = u.id
+    JOIN shift_users su ON su.shift_id = s.id
+    JOIN users u ON su.user_id = u.id
     WHERE er.equipment_id = ?
     ORDER BY s.start_time DESC`, [equipmentId], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
@@ -239,38 +246,106 @@ app.patch('/api/equipment/:id/restore', authenticateToken, isAdmin, (req, res) =
 });
 
 app.get('/api/shifts', authenticateToken, (req, res) => {
-  // Все пользователи видят все смены
-  const query = `SELECT s.*, u.username, u.first_name, u.last_name, u.full_name, 
-    (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report 
-    FROM shifts s JOIN users u ON s.user_id = u.id 
-    ORDER BY s.start_time DESC`;
+  // Все пользователи видят все смены, users через shift_users
+  const query = `SELECT s.*, 
+    (SELECT COUNT(*) FROM reports WHERE shift_id = s.id) as has_report
+    FROM shifts s ORDER BY s.start_time DESC`;
   db.all(query, [], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
-    res.json(rows);
+    // Для каждой смены подгружаем назначенных пользователей
+    const shiftIds = rows.map(r => r.id);
+    if (shiftIds.length === 0) return res.json([]);
+    const placeholders = shiftIds.map(() => '?').join(',');
+    db.all(`SELECT su.shift_id, u.id as user_id, u.username, u.first_name, u.last_name, u.full_name 
+      FROM shift_users su JOIN users u ON su.user_id = u.id 
+      WHERE su.shift_id IN (${placeholders})`, shiftIds, (err2, userRows) => {
+      if (err2) return res.status(500).json({ error: 'Database error' });
+      const userMap = {};
+      userRows.forEach(ur => {
+        if (!userMap[ur.shift_id]) userMap[ur.shift_id] = [];
+        userMap[ur.shift_id].push({ id: ur.user_id, username: ur.username, first_name: ur.first_name, last_name: ur.last_name, full_name: ur.full_name });
+      });
+      rows.forEach(row => {
+        row.users = userMap[row.id] || [];
+        // Обратная совместимость: user_id, username и т.д. от первого назначенного
+        if (row.users.length > 0) {
+          row.user_id = row.users[0].id;
+          row.username = row.users[0].username;
+          row.first_name = row.users[0].first_name;
+          row.last_name = row.users[0].last_name;
+          row.full_name = row.users[0].full_name;
+        }
+      });
+      res.json(rows);
+    });
   });
 });
 
 app.get('/api/shifts/:id', authenticateToken, (req, res) => {
-  db.get(`SELECT s.*, u.username, u.first_name, u.last_name, u.full_name FROM shifts s JOIN users u ON s.user_id = u.id WHERE s.id = ?`, [req.params.id], (err, row) => {
+  db.get(`SELECT s.* FROM shifts s WHERE s.id = ?`, [req.params.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (!row) return res.status(404).json({ error: 'Shift not found' });
-    res.json(row);
+    db.all(`SELECT u.id as user_id, u.username, u.first_name, u.last_name, u.full_name 
+      FROM shift_users su JOIN users u ON su.user_id = u.id WHERE su.shift_id = ?`, [row.id], (err2, users) => {
+      if (err2) return res.status(500).json({ error: 'Database error' });
+      row.users = users;
+      if (users.length > 0) {
+        row.user_id = users[0].user_id;
+        row.username = users[0].username;
+        row.first_name = users[0].first_name;
+        row.last_name = users[0].last_name;
+        row.full_name = users[0].full_name;
+      }
+      res.json(row);
+    });
   });
 });
 
 app.post('/api/shifts', authenticateToken, isAdmin, (req, res) => {
-  const { user_id, start_time, end_time, description, location } = req.body;
+  const { user_ids, user_id, start_time, end_time, description, location } = req.body;
+  // Поддерживаем и user_ids (массив) и user_id (одиночный) для обратной совместимости
+  const assignedUsers = user_ids || (user_id ? [user_id] : []);
+  if (assignedUsers.length === 0) return res.status(400).json({ error: 'Нужно назначить хотя бы одного пользователя' });
   db.run('INSERT INTO shifts (user_id, start_time, end_time, description, location) VALUES (?, ?, ?, ?, ?)',
-    [user_id, start_time, end_time, description, location],
+    [assignedUsers[0], start_time, end_time, description, location],
     function(err) {
       if (err) return res.status(500).json({ error: 'Failed to create shift' });
-      res.json({ id: this.lastID, message: 'Shift created successfully' });
+      const shiftId = this.lastID;
+      const stmt = db.prepare('INSERT OR IGNORE INTO shift_users (shift_id, user_id) VALUES (?, ?)');
+      assignedUsers.forEach(uid => stmt.run(shiftId, uid));
+      stmt.finalize(() => {
+        res.json({ id: shiftId, message: 'Shift created successfully' });
+      });
+    });
+});
+
+// Редактирование смены (админ)
+app.put('/api/shifts/:id', authenticateToken, isAdmin, (req, res) => {
+  const { user_ids, user_id, start_time, end_time, description, location } = req.body;
+  const assignedUsers = user_ids || (user_id ? [user_id] : []);
+  db.run('UPDATE shifts SET user_id = ?, start_time = ?, end_time = ?, description = ?, location = ? WHERE id = ?',
+    [assignedUsers[0] || null, start_time, end_time, description, location, req.params.id],
+    function(err) {
+      if (err) return res.status(500).json({ error: 'Failed to update shift' });
+      if (this.changes === 0) return res.status(404).json({ error: 'Shift not found' });
+      // Пересоздаём назначения
+      db.run('DELETE FROM shift_users WHERE shift_id = ?', [req.params.id], (err2) => {
+        if (err2) return res.status(500).json({ error: 'Failed to update shift users' });
+        if (assignedUsers.length === 0) return res.json({ message: 'Shift updated successfully' });
+        const stmt = db.prepare('INSERT OR IGNORE INTO shift_users (shift_id, user_id) VALUES (?, ?)');
+        assignedUsers.forEach(uid => stmt.run(req.params.id, uid));
+        stmt.finalize(() => {
+          res.json({ message: 'Shift updated successfully' });
+        });
+      });
     });
 });
 
 app.delete('/api/shifts/:id', authenticateToken, isAdmin, (req, res) => {
   db.all('SELECT er.photo_files, er.audio_file FROM equipment_reports er JOIN reports r ON er.report_id = r.id WHERE r.shift_id = ?', [req.params.id], (err, items) => {
     if (err) return res.status(500).json({ error: 'Database error' });
+    // Удаляем назначения из shift_users (CASCADE должен сработать, но на всякий случай)
+    db.run('DELETE FROM shift_users WHERE shift_id = ?', [req.params.id]);
     db.run('DELETE FROM shifts WHERE id = ?', [req.params.id], function(err) {
       if (err) return res.status(500).json({ error: 'Failed to delete shift' });
       items.forEach(item => {
@@ -313,7 +388,7 @@ app.post('/api/reports/v2/create', authenticateToken, (req, res) => {
       if (existing) return res.status(400).json({ error: 'Отчёт уже существует для этой смены' });
 
       const shift = await new Promise((resolve, reject) => {
-        db.get('SELECT user_id, start_time FROM shifts WHERE id = ?', [shift_id], (err, row) => err ? reject(err) : resolve(row));
+        db.get('SELECT start_time FROM shifts WHERE id = ?', [shift_id], (err, row) => err ? reject(err) : resolve(row));
       });
       if (!shift) return res.status(404).json({ error: 'Shift not found' });
 
@@ -323,7 +398,11 @@ app.post('/api/reports/v2/create', authenticateToken, (req, res) => {
         shiftDate.setHours(0, 0, 0, 0);
         today.setHours(0, 0, 0, 0);
         if (shiftDate > today) return res.status(403).json({ error: 'Нельзя создать отчёт для будущей смены' });
-        if (shift.user_id !== req.user.id) return res.status(403).json({ error: 'You can only create reports for your own shifts' });
+        // Проверяем через shift_users
+        const isAssigned = await new Promise((resolve, reject) => {
+          db.get('SELECT id FROM shift_users WHERE shift_id = ? AND user_id = ?', [shift_id, req.user.id], (err, row) => err ? reject(err) : resolve(row));
+        });
+        if (!isAssigned) return res.status(403).json({ error: 'Вы не назначены на эту смену' });
       }
 
       const items = JSON.parse(equipment_items);
