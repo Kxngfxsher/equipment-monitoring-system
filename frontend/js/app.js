@@ -4,6 +4,8 @@ let currentUser = null;
 let currentShiftId = null;
 let allEquipment = [];
 let allShiftsData = []; // храним все смены
+let currentFolderId = null;
+let allFolders = [];
 
 if (!token) window.location.href = 'login.html';
 
@@ -760,7 +762,13 @@ function setupEventListeners() {
     if (docsBtn) docsBtn.addEventListener('click', openDocumentsModal);
 
     const docUploadBtn = document.getElementById('docUploadBtn');
-    if (docUploadBtn) docUploadBtn.addEventListener('click', uploadDocuments);
+    if (docUploadBtn) docUploadBtn.addEventListener("click", uploadDocuments);
+
+    const createFolderBtn = document.getElementById("createFolderBtn");
+    if (createFolderBtn) createFolderBtn.addEventListener("click", createFolder);
+
+    const newFolderInput = document.getElementById("newFolderName");
+    if (newFolderInput) newFolderInput.addEventListener("keydown", (e) => { if (e.key === "Enter") createFolder(); });
 
     const addEquipmentBtn = document.getElementById('addEquipmentBtn');
     if (addEquipmentBtn) addEquipmentBtn.addEventListener('click', openAddEquipment);
@@ -1068,18 +1076,175 @@ document.getElementById('saveEditEquipmentBtn').addEventListener('click', async 
 
 // === ДОКУМЕНТАЦИЯ ===
 
+
+// ==================== ДОКУМЕНТАЦИЯ С ПАПКАМИ ====================
+
+
 async function openDocumentsModal() {
     const isAdminUser = currentUser && currentUser.role === 'admin';
     const uploadSection = document.getElementById('docUploadSection');
+    const folderAdmin = document.getElementById('folderAdminSection');
     if (uploadSection) uploadSection.style.display = isAdminUser ? 'block' : 'none';
+    if (folderAdmin) folderAdmin.style.display = isAdminUser ? 'block' : 'none';
+    
+    currentFolderId = null;
+    await loadFolders();
     await loadDocuments();
     new bootstrap.Modal(document.getElementById('documentsModal')).show();
 }
 
+// === ПАПКИ ===
+
+async function loadFolders() {
+    try {
+        const res = await fetch(`${API_URL}/api/document-folders`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) throw new Error('Ошибка');
+        const data = await res.json();
+        allFolders = data.folders;
+        displayFolders(data.folders, data.uncategorized_count);
+    } catch(e) {
+        console.error('Ошибка загрузки папок:', e);
+    }
+}
+
+function displayFolders(folders, uncategorizedCount) {
+    const container = document.getElementById('foldersList');
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    
+    const totalCount = folders.reduce((s, f) => s + f.doc_count, 0) + uncategorizedCount;
+    
+    let html = `
+        <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 ${currentFolderId === null ? 'active' : ''}" 
+           onclick="selectFolder(null); return false;">
+            <span><i class="bi bi-files"></i> Все файлы</span>
+            <span class="badge ${currentFolderId === null ? 'bg-light text-primary' : 'bg-primary'} rounded-pill">${totalCount}</span>
+        </a>
+    `;
+    
+    folders.forEach(f => {
+        html += `
+        <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 ${currentFolderId === f.id ? 'active' : ''}"
+           onclick="selectFolder(${f.id}); return false;">
+            <span class="text-truncate me-1" style="max-width:140px;" title="${f.name}">
+                <i class="bi bi-folder${currentFolderId === f.id ? '2-open' : ''}"></i> ${f.name}
+            </span>
+            <span class="d-flex align-items-center gap-1">
+                <span class="badge ${currentFolderId === f.id ? 'bg-light text-primary' : 'bg-primary'} rounded-pill">${f.doc_count}</span>
+                ${isAdminUser ? `
+                <span class="btn-group btn-group-sm">
+                    <button class="btn btn-link btn-sm p-0 text-muted" onclick="event.preventDefault(); event.stopPropagation(); renameFolder(${f.id}, '${f.name.replace(/'/g, "\\'")}')" title="Переименовать">
+                        <i class="bi bi-pencil" style="font-size:0.7rem;"></i>
+                    </button>
+                    <button class="btn btn-link btn-sm p-0 text-danger" onclick="event.preventDefault(); event.stopPropagation(); deleteFolder(${f.id}, '${f.name.replace(/'/g, "\\'")}')" title="Удалить">
+                        <i class="bi bi-x-lg" style="font-size:0.7rem;"></i>
+                    </button>
+                </span>
+                ` : ''}
+            </span>
+        </a>`;
+    });
+    
+    if (uncategorizedCount > 0) {
+        html += `
+        <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 ${currentFolderId === 0 ? 'active' : ''}"
+           onclick="selectFolder(0); return false;">
+            <span><i class="bi bi-file-earmark"></i> Без папки</span>
+            <span class="badge ${currentFolderId === 0 ? 'bg-light text-primary' : 'bg-secondary'} rounded-pill">${uncategorizedCount}</span>
+        </a>`;
+    }
+    
+    container.innerHTML = html;
+}
+
+async function selectFolder(folderId) {
+    currentFolderId = folderId;
+    updateBreadcrumb();
+    await loadFolders(); // обновим подсветку
+    await loadDocuments();
+}
+
+function updateBreadcrumb() {
+    const bc = document.getElementById('docBreadcrumb');
+    if (!bc) return;
+    if (currentFolderId === null) {
+        bc.innerHTML = '<small class="text-muted"><i class="bi bi-folder2-open"></i> Все файлы</small>';
+    } else if (currentFolderId === 0) {
+        bc.innerHTML = '<small class="text-muted"><a href="#" onclick="selectFolder(null); return false;"><i class="bi bi-folder2-open"></i> Все файлы</a> / Без папки</small>';
+    } else {
+        const folder = allFolders.find(f => f.id === currentFolderId);
+        const name = folder ? folder.name : 'Папка';
+        bc.innerHTML = `<small class="text-muted"><a href="#" onclick="selectFolder(null); return false;"><i class="bi bi-folder2-open"></i> Все файлы</a> / <i class="bi bi-folder"></i> ${name}</small>`;
+    }
+}
+
+async function createFolder() {
+    const input = document.getElementById('newFolderName');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+        const res = await fetch(`${API_URL}/api/document-folders`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        if (!res.ok) { const e = await res.json(); alert(e.error); return; }
+        input.value = '';
+        await loadFolders();
+    } catch(e) { alert('Ошибка создания папки'); }
+}
+
+async function renameFolder(id, currentName) {
+    const newName = prompt('Новое название папки:', currentName);
+    if (!newName || newName.trim() === currentName) return;
+    try {
+        const res = await fetch(`${API_URL}/api/document-folders/${id}`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() })
+        });
+        if (!res.ok) { const e = await res.json(); alert(e.error); return; }
+        await loadFolders();
+        updateBreadcrumb();
+    } catch(e) { alert('Ошибка переименования'); }
+}
+
+async function deleteFolder(id, name) {
+    if (!confirm(`Удалить папку "${name}"?\nФайлы из неё переместятся в корень.`)) return;
+    try {
+        const res = await fetch(`${API_URL}/api/document-folders/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) { const e = await res.json(); alert(e.error); return; }
+        if (currentFolderId === id) currentFolderId = null;
+        await loadFolders();
+        await loadDocuments();
+    } catch(e) { alert('Ошибка удаления папки'); }
+}
+
+async function moveDocument(docId, folderId) {
+    try {
+        const res = await fetch(`${API_URL}/api/documents/${docId}/move`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_id: folderId })
+        });
+        if (!res.ok) { const e = await res.json(); alert(e.error); return; }
+        await loadFolders();
+        await loadDocuments();
+    } catch(e) { alert('Ошибка перемещения'); }
+}
+
+// === ДОКУМЕНТЫ ===
+
 async function loadDocuments() {
     const container = document.getElementById('documentsList');
     try {
-        const res = await fetch(`${API_URL}/api/documents`, { headers: { 'Authorization': `Bearer ${token}` } });
+        let url = `${API_URL}/api/documents`;
+        if (currentFolderId !== null) {
+            url += `?folder_id=${currentFolderId}`;
+        }
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!res.ok) throw new Error('Ошибка загрузки');
         const docs = await res.json();
         displayDocuments(docs);
@@ -1093,7 +1258,7 @@ function displayDocuments(docs) {
     const isAdminUser = currentUser && currentUser.role === 'admin';
     
     if (docs.length === 0) {
-        container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle"></i> Документы не загружены</div>';
+        container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle"></i> Нет файлов</div>';
         return;
     }
 
@@ -1123,39 +1288,53 @@ function displayDocuments(docs) {
         return mime.startsWith('image/') || mime.startsWith('video/') || mime.startsWith('audio/') || mime.includes('pdf');
     };
 
+    // Выпадающий список папок для перемещения
+    const folderOptions = (docId, currentFolderIdOfDoc) => {
+        if (!isAdminUser || allFolders.length === 0) return '';
+        let opts = `<select class="form-select form-select-sm" style="width:auto;min-width:100px;font-size:0.75rem;" onchange="moveDocument(${docId}, this.value === '' ? null : parseInt(this.value))">`;
+        opts += `<option value="" ${!currentFolderIdOfDoc ? 'selected' : ''}>Без папки</option>`;
+        allFolders.forEach(f => {
+            opts += `<option value="${f.id}" ${currentFolderIdOfDoc === f.id ? 'selected' : ''}>${f.name}</option>`;
+        });
+        opts += `</select>`;
+        return opts;
+    };
+
     container.innerHTML = `
         <div class="table-responsive">
-        <table class="table table-hover">
+        <table class="table table-hover table-sm">
             <thead class="table-dark">
                 <tr>
-                    <th style="width:40px"></th>
+                    <th style="width:30px"></th>
                     <th>Имя файла</th>
                     <th>Размер</th>
                     <th>Загрузил</th>
                     <th>Дата</th>
+                    ${isAdminUser && allFolders.length > 0 ? '<th>Папка</th>' : ''}
                     <th>Действия</th>
                 </tr>
             </thead>
             <tbody>
                 ${docs.map(doc => `
                     <tr>
-                        <td><i class="bi ${getFileIcon(doc.mime_type)} fs-5"></i></td>
+                        <td><i class="bi ${getFileIcon(doc.mime_type)} fs-6"></i></td>
                         <td class="text-break">${doc.original_name}</td>
                         <td class="text-nowrap">${formatSize(doc.size)}</td>
                         <td>${doc.uploaded_by_name || '-'}</td>
                         <td class="text-nowrap">${new Date(doc.created_at).toLocaleDateString('ru-RU')}</td>
+                        ${isAdminUser && allFolders.length > 0 ? `<td>${folderOptions(doc.id, doc.folder_id)}</td>` : ''}
                         <td>
                             <div class="btn-group btn-group-sm">
                                 ${canPreview(doc.mime_type) ? `
-                                    <button class="btn btn-outline-info" onclick="previewDocument(${doc.id}, '${doc.original_name.replace(/'/g, "\\'")}', '${doc.mime_type}')" title="Просмотр">
+                                    <button class="btn btn-outline-info btn-sm" onclick="previewDocument(${doc.id}, '${doc.original_name.replace(/'/g, "\\'")}', '${doc.mime_type}')" title="Просмотр">
                                         <i class="bi bi-eye"></i>
                                     </button>
                                 ` : ''}
-                                <button class="btn btn-outline-primary" onclick="downloadDocument(${doc.id})" title="Скачать">
+                                <button class="btn btn-outline-primary btn-sm" onclick="downloadDocument(${doc.id})" title="Скачать">
                                     <i class="bi bi-download"></i>
                                 </button>
                                 ${isAdminUser ? `
-                                    <button class="btn btn-outline-danger" onclick="deleteDocument(${doc.id}, '${doc.original_name.replace(/'/g, "\\'")}')" title="Удалить">
+                                    <button class="btn btn-outline-danger btn-sm" onclick="deleteDocument(${doc.id}, '${doc.original_name.replace(/'/g, "\\'")}')" title="Удалить">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 ` : ''}
@@ -1183,6 +1362,10 @@ async function uploadDocuments() {
     for (const file of input.files) {
         const formData = new FormData();
         formData.append('file', file);
+        // Загружаем в текущую папку (если выбрана конкретная)
+        if (currentFolderId && currentFolderId > 0) {
+            formData.append('folder_id', currentFolderId);
+        }
         try {
             const res = await fetch(`${API_URL}/api/documents`, {
                 method: 'POST',
@@ -1203,6 +1386,7 @@ async function uploadDocuments() {
     input.value = '';
     progressDiv.style.display = 'none';
     if (progressBar) progressBar.style.width = '0%';
+    await loadFolders();
     await loadDocuments();
 }
 
@@ -1264,6 +1448,7 @@ async function deleteDocument(id, name) {
             alert(err.error);
             return;
         }
+        await loadFolders();
         await loadDocuments();
     } catch(e) { alert('Ошибка удаления'); }
 }

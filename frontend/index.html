@@ -401,35 +401,61 @@
 
     <!-- Документация Modal -->
     <div class="modal fade" id="documentsModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title"><i class="bi bi-folder2-open"></i> Документация</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <!-- Загрузка файла (только админ) -->
-                    <div id="docUploadSection" style="display:none;" class="mb-3">
-                        <div class="card border-primary">
-                            <div class="card-body">
-                                <div class="d-flex align-items-center gap-2">
-                                    <input type="file" class="form-control" id="docFileInput" multiple>
-                                    <button class="btn btn-primary text-nowrap" id="docUploadBtn">
-                                        <i class="bi bi-cloud-upload"></i> Загрузить
-                                    </button>
-                                </div>
-                                <div class="form-text">Максимум 50 МБ на файл. Любые форматы.</div>
-                                <div id="docUploadProgress" class="mt-2" style="display:none;">
-                                    <div class="progress">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+                <div class="modal-body p-0">
+                    <div class="row g-0" style="min-height:450px;">
+                        <!-- Левая панель — папки -->
+                        <div class="col-md-3 border-end bg-light">
+                            <div class="p-2">
+                                <div id="folderAdminSection" style="display:none;" class="mb-2">
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" class="form-control" id="newFolderName" placeholder="Новая папка...">
+                                        <button class="btn btn-outline-primary" id="createFolderBtn" title="Создать папку">
+                                            <i class="bi bi-folder-plus"></i>
+                                        </button>
                                     </div>
+                                </div>
+                                <div class="list-group list-group-flush" id="foldersList">
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Список файлов -->
-                    <div id="documentsList">
-                        <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+                        <!-- Правая панель — файлы -->
+                        <div class="col-md-9">
+                            <div class="p-3">
+                                <!-- Загрузка файла (только админ) -->
+                                <div id="docUploadSection" style="display:none;" class="mb-3">
+                                    <div class="card border-primary">
+                                        <div class="card-body py-2">
+                                            <div class="d-flex align-items-center gap-2">
+                                                <input type="file" class="form-control form-control-sm" id="docFileInput" multiple>
+                                                <button class="btn btn-primary btn-sm text-nowrap" id="docUploadBtn">
+                                                    <i class="bi bi-cloud-upload"></i> Загрузить
+                                                </button>
+                                            </div>
+                                            <div class="form-text">Максимум 50 МБ. В текущую папку.</div>
+                                            <div id="docUploadProgress" class="mt-2" style="display:none;">
+                                                <div class="progress" style="height:5px;">
+                                                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Путь -->
+                                <div id="docBreadcrumb" class="mb-2">
+                                    <small class="text-muted"><i class="bi bi-folder2-open"></i> Все файлы</small>
+                                </div>
+                                <!-- Список файлов -->
+                                <div id="documentsList">
+                                    <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

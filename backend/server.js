@@ -84,11 +84,19 @@ function initDatabase() {
       FOREIGN KEY (equipment_id) REFERENCES equipment(equipment_id)
     )`);
 
+    // Папки документов
+    db.run(`CREATE TABLE IF NOT EXISTS document_folders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     // === Миграции (безопасные — ALTER TABLE с проверкой) ===
     db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
     db.run("ALTER TABLE users ADD COLUMN position TEXT", () => {});
     db.run("ALTER TABLE users ADD COLUMN user_status TEXT DEFAULT 'active'", () => {});
     db.run("ALTER TABLE equipment ADD COLUMN is_deleted INTEGER DEFAULT 0", () => {});
+    db.run("ALTER TABLE documents ADD COLUMN folder_id INTEGER REFERENCES document_folders(id) ON DELETE SET NULL", () => {});
     console.log('✅ Migrations checked');
 
         const hashedPassword = bcrypt.hashSync('admin123', 10);
@@ -478,11 +486,87 @@ const docStorage = multer.diskStorage({
 });
 const docUpload = multer({ storage: docStorage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
 
-// Список документов (все авторизованные)
+// ==================== ПАПКИ ДОКУМЕНТОВ ====================
+
+// Список папок
+app.get('/api/document-folders', authenticateToken, (req, res) => {
+  db.all(`SELECT df.*, COUNT(d.id) as doc_count 
+    FROM document_folders df LEFT JOIN documents d ON d.folder_id = df.id 
+    GROUP BY df.id ORDER BY df.name`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    // Также считаем документы без папки
+    db.get(`SELECT COUNT(*) as count FROM documents WHERE folder_id IS NULL`, [], (err2, row) => {
+      if (err2) return res.status(500).json({ error: 'Database error' });
+      res.json({ folders: rows, uncategorized_count: row.count });
+    });
+  });
+});
+
+// Создать папку (только админ)
+app.post('/api/document-folders', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Название папки обязательно' });
+  db.run(`INSERT INTO document_folders (name) VALUES (?)`, [name.trim()], function(err) {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json({ id: this.lastID, name: name.trim(), message: 'Папка создана' });
+  });
+});
+
+// Переименовать папку (только админ)
+app.put('/api/document-folders/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Название папки обязательно' });
+  db.run(`UPDATE document_folders SET name = ? WHERE id = ?`, [name.trim(), req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    if (this.changes === 0) return res.status(404).json({ error: 'Папка не найдена' });
+    res.json({ message: 'Папка переименована' });
+  });
+});
+
+// Удалить папку (только админ) — документы перемещаются в корень
+app.delete('/api/document-folders/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+  db.run(`UPDATE documents SET folder_id = NULL WHERE folder_id = ?`, [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    db.run(`DELETE FROM document_folders WHERE id = ?`, [req.params.id], function(err2) {
+      if (err2) return res.status(500).json({ error: 'Database error' });
+      if (this.changes === 0) return res.status(404).json({ error: 'Папка не найдена' });
+      res.json({ message: 'Папка удалена, документы перемещены в корень' });
+    });
+  });
+});
+
+// Переместить документ в папку (только админ)
+app.put('/api/documents/:id/move', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор' });
+  const folderId = req.body.folder_id === null || req.body.folder_id === 0 ? null : req.body.folder_id;
+  db.run(`UPDATE documents SET folder_id = ? WHERE id = ?`, [folderId, req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    if (this.changes === 0) return res.status(404).json({ error: 'Документ не найден' });
+    res.json({ message: 'Документ перемещён' });
+  });
+});
+
+// ==================== ДОКУМЕНТЫ ====================
+
+// Список документов (все авторизованные) — с фильтром по папке
 app.get('/api/documents', authenticateToken, (req, res) => {
-  db.all(`SELECT d.*, u.username as uploaded_by_name 
-    FROM documents d LEFT JOIN users u ON d.uploaded_by = u.id 
-    ORDER BY d.created_at DESC`, [], (err, rows) => {
+  const folderId = req.query.folder_id;
+  let sql = `SELECT d.*, u.username as uploaded_by_name 
+    FROM documents d LEFT JOIN users u ON d.uploaded_by = u.id`;
+  let params = [];
+  
+  if (folderId === 'null' || folderId === '0') {
+    sql += ` WHERE d.folder_id IS NULL`;
+  } else if (folderId) {
+    sql += ` WHERE d.folder_id = ?`;
+    params.push(folderId);
+  }
+  sql += ` ORDER BY d.created_at DESC`;
+  
+  db.all(sql, params, (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     res.json(rows);
   });
@@ -493,8 +577,9 @@ app.post('/api/documents', authenticateToken, docUpload.single('file'), (req, re
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор может загружать файлы' });
   if (!req.file) return res.status(400).json({ error: 'Файл не выбран' });
   
-  db.run(`INSERT INTO documents (filename, original_name, mime_type, size, uploaded_by) VALUES (?, ?, ?, ?, ?)`,
-    [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.user.id],
+  const folderId = req.body.folder_id || null;
+  db.run(`INSERT INTO documents (filename, original_name, mime_type, size, uploaded_by, folder_id) VALUES (?, ?, ?, ?, ?, ?)`,
+    [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.user.id, folderId],
     function(err) {
       if (err) return res.status(500).json({ error: 'Database error' });
       res.json({ id: this.lastID, message: 'Файл загружен', filename: req.file.filename, original_name: req.file.originalname });
