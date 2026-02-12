@@ -9,6 +9,7 @@ node_modules/
 backend/uploads/audio-*
 backend/uploads/photos/*
 backend/uploads/tasks/*
+backend/uploads/documents/*
 !backend/uploads/.gitkeep
 
 # OS
