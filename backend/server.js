@@ -3,6 +3,7 @@ const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const PDFDocument = require('pdfkit');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -29,25 +30,10 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 const db = new sqlite3.Database('./equipment_monitoring.db', (err) => {
   if (err) console.error('Error opening database:', err.message);
-  else { console.log('Connected to SQLite database.');
-  // Миграции users: phone, position, user_status
-  db.run("ALTER TABLE users ADD COLUMN phone TEXT", (err) => {
-    if (!err) console.log('✅ Migration: phone added to users');
-  });
-  db.run("ALTER TABLE users ADD COLUMN position TEXT", (err) => {
-    if (!err) console.log('✅ Migration: position added to users');
-  });
-  db.run("ALTER TABLE users ADD COLUMN user_status TEXT DEFAULT 'active'", (err) => {
-    if (!err) console.log('✅ Migration: user_status added to users');
-  });
-  // Миграция: добавляем is_deleted если нет
-  db.run("ALTER TABLE equipment ADD COLUMN is_deleted INTEGER DEFAULT 0", (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.error('Migration error:', err.message);
-    } else if (!err) {
-      console.log('✅ Migration: is_deleted column added to equipment');
-    }
-  }); initDatabase(); }
+  else {
+    console.log('Connected to SQLite database.');
+    initDatabase();
+  }
 });
 
 function initDatabase() {
@@ -98,7 +84,14 @@ function initDatabase() {
       FOREIGN KEY (equipment_id) REFERENCES equipment(equipment_id)
     )`);
 
-    const hashedPassword = bcrypt.hashSync('admin123', 10);
+    // === Миграции (безопасные — ALTER TABLE с проверкой) ===
+    db.run("ALTER TABLE users ADD COLUMN phone TEXT", () => {});
+    db.run("ALTER TABLE users ADD COLUMN position TEXT", () => {});
+    db.run("ALTER TABLE users ADD COLUMN user_status TEXT DEFAULT 'active'", () => {});
+    db.run("ALTER TABLE equipment ADD COLUMN is_deleted INTEGER DEFAULT 0", () => {});
+    console.log('✅ Migrations checked');
+
+        const hashedPassword = bcrypt.hashSync('admin123', 10);
     db.run(`INSERT OR IGNORE INTO users (username, password, role, first_name, last_name, full_name, description) 
             VALUES ('admin', ?, 'admin', 'Администратор', 'Системы', 'Администратор Системы', 'Главный администратор')`, [hashedPassword]);
     const engPassword = bcrypt.hashSync('eng123', 10);
@@ -548,6 +541,250 @@ app.delete('/api/documents/:id', authenticateToken, (req, res) => {
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../frontend/login.html')));
+
+
+// === ГЕНЕРАЦИЯ PDF-ОТЧЁТА ПО ОБОРУДОВАНИЮ ЗА ПЕРИОД ===
+app.get('/api/equipment/:equipId/report', authenticateToken, (req, res) => {
+  const equipmentId = req.params.equipId;
+  const { from, to } = req.query;
+
+  if (!from || !to) {
+    return res.status(400).json({ error: 'Параметры from и to обязательны' });
+  }
+
+  // Получаем информацию об оборудовании по equipment_id (текстовый код)
+  db.get('SELECT * FROM equipment WHERE equipment_id = ?', [equipmentId], (err, equipment) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!equipment) return res.status(404).json({ error: 'Оборудование не найдено' });
+
+    // Получаем записи из equipment_reports за период
+    const sql = `
+      SELECT er.status, er.description as comment, er.photo_files, er.audio_file,
+             er.report_id, er.created_at,
+             r.shift_id, r.user_id,
+             s.start_time, s.end_time, s.description as shift_desc,
+             u.username, u.full_name
+      FROM equipment_reports er
+      JOIN reports r ON er.report_id = r.id
+      JOIN shifts s ON r.shift_id = s.id
+      JOIN users u ON r.user_id = u.id
+      WHERE er.equipment_id = ?
+        AND date(s.start_time) >= ? AND date(s.start_time) <= ?
+      ORDER BY s.start_time DESC, er.created_at DESC
+    `;
+
+    db.all(sql, [equipmentId, from, to], (err2, rows) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      // Адаптируем поля для generatePDF
+      rows.forEach(row => {
+        row.shift_date = row.start_time ? row.start_time.split('T')[0] : null;
+        row.shift_type = null; // У нас нет shift_type — будем показывать время
+        row.shift_time = row.start_time && row.end_time
+          ? row.start_time.substring(11, 16) + '–' + row.end_time.substring(11, 16)
+          : '';
+        row.media = [];
+        // Парсим фото
+        if (row.photo_files) {
+          try {
+            const photos = JSON.parse(row.photo_files);
+            photos.forEach(p => row.media.push({ media_type: 'photo', file_path: p }));
+          } catch(e) {}
+        }
+        // Аудио
+        if (row.audio_file) {
+          row.media.push({ media_type: 'audio', file_path: row.audio_file });
+        }
+      });
+
+      generatePDF(res, equipment, rows, from, to);
+    });
+  });
+});
+
+function generatePDF(res, equipment, rows, fromDate, toDate) {
+  const fontsDir = path.join(__dirname, 'fonts');
+  const fontRegular = path.join(fontsDir, 'Roboto-Regular.ttf');
+  const fontBold = path.join(fontsDir, 'Roboto-Bold.ttf');
+
+  const doc = new PDFDocument({ 
+    size: 'A4', 
+    margin: 40,
+    bufferPages: true,
+    info: {
+      Title: 'Отчёт по оборудованию: ' + equipment.name,
+      Author: 'Equipment Monitoring System',
+      CreationDate: new Date()
+    }
+  });
+
+  // Стрим напрямую в response
+  res.setHeader('Content-Type', 'application/pdf');
+  const filename = encodeURIComponent('Отчёт_' + equipment.name + '_' + fromDate + '_' + toDate + '.pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+  doc.pipe(res);
+
+  // Регистрируем шрифты
+  doc.registerFont('Regular', fontRegular);
+  doc.registerFont('Bold', fontBold);
+
+  const formatDate = (d) => {
+    if (!d) return '-';
+    const parts = d.split('-');
+    if (parts.length === 3) return parts[2] + '.' + parts[1] + '.' + parts[0];
+    return d;
+  };
+
+  const shiftTypeName = (t) => {
+    const types = { day: 'Дневная', night: 'Ночная', morning: 'Утренняя', evening: 'Вечерняя' };
+    return types[t] || t || '-';
+  };
+
+  const statusLabel = (s) => {
+    const statuses = { 
+      working: 'Исправно', 
+      faulty: 'Неисправно',
+      maintenance: 'На обслуживании'
+    };
+    return statuses[s] || s || '-';
+  };
+
+  const pageWidth = doc.page.width - 80;
+
+  // === ШАПКА ===
+  doc.font('Bold').fontSize(18).fillColor('#1a237e')
+     .text('ОТЧЁТ ПО ОБОРУДОВАНИЮ', { align: 'center' });
+  doc.moveDown(0.3);
+
+  doc.font('Bold').fontSize(14).fillColor('#333')
+     .text(equipment.name, { align: 'center' });
+  doc.moveDown(0.2);
+
+  if (equipment.location) {
+    doc.font('Regular').fontSize(10).fillColor('#666')
+       .text('Расположение: ' + equipment.location, { align: 'center' });
+  }
+  doc.moveDown(0.3);
+
+  doc.font('Regular').fontSize(10).fillColor('#666')
+     .text('Период: ' + formatDate(fromDate) + ' — ' + formatDate(toDate), { align: 'center' });
+  doc.moveDown(0.2);
+
+  doc.font('Regular').fontSize(9).fillColor('#999')
+     .text('Сформирован: ' + new Date().toLocaleString('ru-RU'), { align: 'center' });
+  doc.moveDown(0.5);
+
+  // Разделитель
+  doc.moveTo(40, doc.y).lineTo(40 + pageWidth, doc.y).strokeColor('#1a237e').lineWidth(2).stroke();
+  doc.moveDown(0.5);
+
+  // === СВОДКА ===
+  doc.font('Bold').fontSize(12).fillColor('#333')
+     .text('Сводная информация');
+  doc.moveDown(0.3);
+
+  const totalRecords = rows.length;
+  const statusCounts = {};
+  rows.forEach(r => {
+    const label = statusLabel(r.status);
+    statusCounts[label] = (statusCounts[label] || 0) + 1;
+  });
+
+  doc.font('Regular').fontSize(10).fillColor('#333');
+  doc.text('Всего записей: ' + totalRecords);
+  Object.entries(statusCounts).forEach(([status, count]) => {
+    doc.text('  • ' + status + ': ' + count);
+  });
+  doc.moveDown(0.5);
+
+  // Тонкий разделитель
+  doc.moveTo(40, doc.y).lineTo(40 + pageWidth, doc.y).strokeColor('#ccc').lineWidth(0.5).stroke();
+  doc.moveDown(0.5);
+
+  // === ЗАПИСИ ===
+  if (rows.length === 0) {
+    doc.font('Regular').fontSize(11).fillColor('#999')
+       .text('За указанный период записи отсутствуют.', { align: 'center' });
+  } else {
+    doc.font('Bold').fontSize(12).fillColor('#333')
+       .text('Детализация по сменам');
+    doc.moveDown(0.5);
+
+    rows.forEach((row, index) => {
+      // Проверяем нужна ли новая страница
+      if (doc.y > doc.page.height - 200) {
+        doc.addPage();
+      }
+
+      // Статус цветом
+      let statusColor = '#4caf50';
+      if (row.status === 'faulty') statusColor = '#f44336';
+      if (row.status === 'maintenance') statusColor = '#ff9800';
+
+      // Заголовок записи
+      doc.font('Bold').fontSize(10).fillColor(statusColor)
+         .text('● ' + statusLabel(row.status), { continued: true });
+      doc.font('Regular').fontSize(10).fillColor('#333')
+         .text('    ' + formatDate(row.shift_date) + ' | ' + (row.shift_time || '-') + ' | ' + (row.full_name || row.username));
+      doc.moveDown(0.2);
+
+      // Комментарий
+      if (row.comment) {
+        doc.font('Regular').fontSize(9).fillColor('#555')
+           .text('Комментарий: ' + row.comment, { indent: 15 });
+        doc.moveDown(0.2);
+      }
+
+      // Медиа
+      if (row.media && row.media.length > 0) {
+        row.media.forEach(m => {
+          if (m.media_type === 'photo' && m.file_path) {
+            const photoPath = path.join(__dirname, m.file_path);
+            try {
+              const fs = require('fs');
+              if (fs.existsSync(photoPath)) {
+                if (doc.y > doc.page.height - 250) {
+                  doc.addPage();
+                }
+                doc.image(photoPath, doc.x + 15, doc.y, { 
+                  fit: [200, 150], 
+                  align: 'left'
+                });
+                doc.moveDown(0.3);
+                // Сдвигаем Y вниз после картинки
+                doc.y = doc.y + 150;
+              }
+            } catch(imgErr) {
+              doc.font('Regular').fontSize(8).fillColor('#999')
+                 .text('[Фото: файл недоступен]', { indent: 15 });
+            }
+          } else if (m.media_type === 'audio') {
+            doc.font('Regular').fontSize(8).fillColor('#999')
+               .text('[Прикреплён аудиофайл]', { indent: 15 });
+            doc.moveDown(0.1);
+          }
+        });
+      }
+
+      // Разделитель между записями
+      if (index < rows.length - 1) {
+        doc.moveDown(0.3);
+        doc.moveTo(55, doc.y).lineTo(40 + pageWidth - 15, doc.y)
+           .strokeColor('#e0e0e0').lineWidth(0.5).stroke();
+        doc.moveDown(0.4);
+      }
+    });
+  }
+
+  // === НИЖНИЙ КОЛОНТИТУЛ ===
+  doc.moveDown(1);
+  doc.moveTo(40, doc.y).lineTo(40 + pageWidth, doc.y).strokeColor('#1a237e').lineWidth(1).stroke();
+  doc.moveDown(0.3);
+  doc.font('Regular').fontSize(8).fillColor('#999')
+     .text('Equipment Monitoring System | Автоматически сгенерированный отчёт', { align: 'center' });
+
+  doc.end();
+}
 
 app.listen(PORT, () => {
   console.log(`\n===========================================`);

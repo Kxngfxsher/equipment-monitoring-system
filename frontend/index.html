@@ -329,6 +329,32 @@
                 </div>
                 <div class="modal-body">
                     <h6 id="historyEquipmentName" class="mb-3"></h6>
+                    
+                    <!-- Блок генерации отчёта -->
+                    <div class="card mb-3 border-primary">
+                        <div class="card-body py-2">
+                            <div class="row align-items-end g-2">
+                                <div class="col-auto">
+                                    <label class="form-label mb-1 small fw-bold text-primary">
+                                        <i class="bi bi-file-earmark-pdf"></i> Отчёт за период
+                                    </label>
+                                </div>
+                                <div class="col">
+                                    <input type="date" class="form-control form-control-sm" id="reportDateFrom">
+                                </div>
+                                <div class="col-auto pt-1">—</div>
+                                <div class="col">
+                                    <input type="date" class="form-control form-control-sm" id="reportDateTo">
+                                </div>
+                                <div class="col-auto">
+                                    <button class="btn btn-primary btn-sm" id="generateReportBtn" onclick="generateEquipmentReport()">
+                                        <i class="bi bi-download"></i> Сформировать PDF
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="equipmentHistoryContainer"></div>
                 </div>
             </div>

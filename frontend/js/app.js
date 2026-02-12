@@ -816,6 +816,21 @@ function setSchedule(type) {
 
 // === История оборудования ===
 async function viewEquipmentHistory(equipmentId, equipmentName) {
+    // Сохраняем для генерации PDF
+    window._currentHistoryEquipmentId = equipmentId;
+    window._currentHistoryEquipmentName = equipmentName;
+
+    // Устанавливаем даты по умолчанию (текущий месяц)
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const today = now.toISOString().split('T')[0];
+    setTimeout(() => {
+        const fromEl = document.getElementById('reportDateFrom');
+        const toEl = document.getElementById('reportDateTo');
+        if (fromEl && !fromEl.value) fromEl.value = firstDay;
+        if (toEl && !toEl.value) toEl.value = today;
+    }, 100);
+
     try {
         const res = await fetch(`${API_URL}/api/equipment/${equipmentId}/history`, {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -908,6 +923,63 @@ async function viewEquipmentHistory(equipmentId, equipmentName) {
     } catch (error) {
         alert('Ошибка загрузки истории');
         console.error(error);
+    }
+}
+
+// === Генерация PDF-отчёта по оборудованию ===
+async function generateEquipmentReport() {
+    const equipmentId = window._currentHistoryEquipmentId;
+    if (!equipmentId) {
+        alert('Ошибка: оборудование не выбрано');
+        return;
+    }
+
+    const from = document.getElementById('reportDateFrom').value;
+    const to = document.getElementById('reportDateTo').value;
+
+    if (!from || !to) {
+        alert('Укажите период (даты "от" и "до")');
+        return;
+    }
+
+    if (from > to) {
+        alert('Дата "от" не может быть позже даты "до"');
+        return;
+    }
+
+    const btn = document.getElementById('generateReportBtn');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Формирование...';
+
+    try {
+        const res = await fetch(
+            `${API_URL}/api/equipment/${equipmentId}/report?from=${from}&to=${to}`, 
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
+            throw new Error(err.error || 'Ошибка генерации отчёта');
+        }
+
+        // Скачиваем PDF
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const name = window._currentHistoryEquipmentName || 'equipment';
+        a.download = `Отчёт_${name}_${from}_${to}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        alert('Ошибка: ' + error.message);
+        console.error(error);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
     }
 }
 
