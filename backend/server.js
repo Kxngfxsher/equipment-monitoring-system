@@ -588,12 +588,12 @@ app.get('/api/equipment/:equipId/report', authenticateToken, (req, res) => {
         if (row.photo_files) {
           try {
             const photos = JSON.parse(row.photo_files);
-            photos.forEach(p => row.media.push({ media_type: 'photo', file_path: p }));
+            photos.forEach(p => row.media.push({ media_type: 'photo', file_path: 'uploads/photos/' + p }));
           } catch(e) {}
         }
         // Аудио
         if (row.audio_file) {
-          row.media.push({ media_type: 'audio', file_path: row.audio_file });
+          row.media.push({ media_type: 'audio', file_path: row.audio_file.startsWith('uploads') ? row.audio_file : 'uploads/photos/' + row.audio_file });
         }
       });
 
@@ -693,7 +693,7 @@ function generatePDF(res, equipment, rows, fromDate, toDate) {
   doc.font('Regular').fontSize(10).fillColor('#333');
   doc.text('Всего записей: ' + totalRecords);
   Object.entries(statusCounts).forEach(([status, count]) => {
-    doc.text('  • ' + status + ': ' + count);
+    doc.text('  - ' + status + ': ' + count);
   });
   doc.moveDown(0.5);
 
@@ -723,7 +723,7 @@ function generatePDF(res, equipment, rows, fromDate, toDate) {
 
       // Заголовок записи
       doc.font('Bold').fontSize(10).fillColor(statusColor)
-         .text('● ' + statusLabel(row.status), { continued: true });
+         .text(statusLabel(row.status), { continued: true });
       doc.font('Regular').fontSize(10).fillColor('#333')
          .text('    ' + formatDate(row.shift_date) + ' | ' + (row.shift_time || '-') + ' | ' + (row.full_name || row.username));
       doc.moveDown(0.2);
