@@ -756,6 +756,12 @@ function setupEventListeners() {
     const equipmentBtn = document.getElementById('manageEquipmentBtn');
     if (equipmentBtn) equipmentBtn.addEventListener('click', openEquipmentModal);
 
+    const docsBtn = document.getElementById('manageDocsBtn');
+    if (docsBtn) docsBtn.addEventListener('click', openDocumentsModal);
+
+    const docUploadBtn = document.getElementById('docUploadBtn');
+    if (docUploadBtn) docUploadBtn.addEventListener('click', uploadDocuments);
+
     const addEquipmentBtn = document.getElementById('addEquipmentBtn');
     if (addEquipmentBtn) addEquipmentBtn.addEventListener('click', openAddEquipment);
 
@@ -987,3 +993,205 @@ document.getElementById('saveEditEquipmentBtn').addEventListener('click', async 
         alert('Ошибка: ' + error.message);
     }
 });
+
+// === ДОКУМЕНТАЦИЯ ===
+
+async function openDocumentsModal() {
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    const uploadSection = document.getElementById('docUploadSection');
+    if (uploadSection) uploadSection.style.display = isAdminUser ? 'block' : 'none';
+    await loadDocuments();
+    new bootstrap.Modal(document.getElementById('documentsModal')).show();
+}
+
+async function loadDocuments() {
+    const container = document.getElementById('documentsList');
+    try {
+        const res = await fetch(`${API_URL}/api/documents`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!res.ok) throw new Error('Ошибка загрузки');
+        const docs = await res.json();
+        displayDocuments(docs);
+    } catch(e) {
+        container.innerHTML = '<div class="alert alert-danger">Ошибка загрузки документов</div>';
+    }
+}
+
+function displayDocuments(docs) {
+    const container = document.getElementById('documentsList');
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    
+    if (docs.length === 0) {
+        container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle"></i> Документы не загружены</div>';
+        return;
+    }
+
+    const getFileIcon = (mime) => {
+        if (!mime) return 'bi-file-earmark';
+        if (mime.startsWith('image/')) return 'bi-file-earmark-image text-success';
+        if (mime.startsWith('video/')) return 'bi-file-earmark-play text-danger';
+        if (mime.startsWith('audio/')) return 'bi-file-earmark-music text-warning';
+        if (mime.includes('pdf')) return 'bi-file-earmark-pdf text-danger';
+        if (mime.includes('word') || mime.includes('document')) return 'bi-file-earmark-word text-primary';
+        if (mime.includes('sheet') || mime.includes('excel')) return 'bi-file-earmark-excel text-success';
+        if (mime.includes('presentation') || mime.includes('powerpoint')) return 'bi-file-earmark-ppt text-warning';
+        if (mime.includes('zip') || mime.includes('rar') || mime.includes('archive')) return 'bi-file-earmark-zip text-secondary';
+        if (mime.includes('text')) return 'bi-file-earmark-text text-info';
+        return 'bi-file-earmark';
+    };
+
+    const formatSize = (bytes) => {
+        if (!bytes) return '-';
+        if (bytes < 1024) return bytes + ' Б';
+        if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' КБ';
+        return (bytes/(1024*1024)).toFixed(1) + ' МБ';
+    };
+
+    const canPreview = (mime) => {
+        if (!mime) return false;
+        return mime.startsWith('image/') || mime.startsWith('video/') || mime.startsWith('audio/') || mime.includes('pdf');
+    };
+
+    container.innerHTML = `
+        <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width:40px"></th>
+                    <th>Имя файла</th>
+                    <th>Размер</th>
+                    <th>Загрузил</th>
+                    <th>Дата</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${docs.map(doc => `
+                    <tr>
+                        <td><i class="bi ${getFileIcon(doc.mime_type)} fs-5"></i></td>
+                        <td class="text-break">${doc.original_name}</td>
+                        <td class="text-nowrap">${formatSize(doc.size)}</td>
+                        <td>${doc.uploaded_by_name || '-'}</td>
+                        <td class="text-nowrap">${new Date(doc.created_at).toLocaleDateString('ru-RU')}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                ${canPreview(doc.mime_type) ? `
+                                    <button class="btn btn-outline-info" onclick="previewDocument(${doc.id}, '${doc.original_name.replace(/'/g, "\\'")}', '${doc.mime_type}')" title="Просмотр">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                ` : ''}
+                                <button class="btn btn-outline-primary" onclick="downloadDocument(${doc.id})" title="Скачать">
+                                    <i class="bi bi-download"></i>
+                                </button>
+                                ${isAdminUser ? `
+                                    <button class="btn btn-outline-danger" onclick="deleteDocument(${doc.id}, '${doc.original_name.replace(/'/g, "\\'")}')" title="Удалить">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+        </div>
+    `;
+}
+
+async function uploadDocuments() {
+    const input = document.getElementById('docFileInput');
+    if (!input.files.length) return alert('Выберите файл(ы)');
+    
+    const progressDiv = document.getElementById('docUploadProgress');
+    const progressBar = progressDiv?.querySelector('.progress-bar');
+    progressDiv.style.display = 'block';
+    
+    let uploaded = 0;
+    const total = input.files.length;
+    
+    for (const file of input.files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const res = await fetch(`${API_URL}/api/documents`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                alert('Ошибка загрузки ' + file.name + ': ' + err.error);
+            }
+        } catch(e) {
+            alert('Ошибка загрузки ' + file.name);
+        }
+        uploaded++;
+        if (progressBar) progressBar.style.width = Math.round(uploaded/total*100) + '%';
+    }
+    
+    input.value = '';
+    progressDiv.style.display = 'none';
+    if (progressBar) progressBar.style.width = '0%';
+    await loadDocuments();
+}
+
+async function downloadDocument(id) {
+    try {
+        const res = await fetch(`${API_URL}/api/documents/${id}/download`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Ошибка');
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition');
+        let filename = 'file';
+        if (disposition) {
+            const match = disposition.match(/filename[^;=\n]*=(["\']*)(.*?)\1(;|$)/);
+            if (match) filename = decodeURIComponent(match[2]);
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch(e) { alert('Ошибка скачивания'); }
+}
+
+function previewDocument(id, name, mimeType) {
+    const title = document.getElementById('docPreviewTitle');
+    const body = document.getElementById('docPreviewBody');
+    const downloadLink = document.getElementById('docPreviewDownload');
+    
+    title.textContent = name;
+    downloadLink.onclick = (e) => { e.preventDefault(); downloadDocument(id); };
+    
+    const url = `${API_URL}/api/documents/${id}/preview?token=${token}`;
+    
+    if (mimeType.startsWith('image/')) {
+        body.innerHTML = `<img src="${url}" class="img-fluid rounded" alt="${name}" style="max-height:70vh;">`;
+    } else if (mimeType.startsWith('video/')) {
+        body.innerHTML = `<video controls class="w-100" style="max-height:70vh;"><source src="${url}" type="${mimeType}">Видео не поддерживается</video>`;
+    } else if (mimeType.startsWith('audio/')) {
+        body.innerHTML = `<div class="py-5"><i class="bi bi-music-note-beamed display-1 text-warning"></i><br><br><audio controls class="w-100"><source src="${url}" type="${mimeType}">Аудио не поддерживается</audio></div>`;
+    } else if (mimeType.includes('pdf')) {
+        body.innerHTML = `<iframe src="${url}" class="w-100" style="height:70vh; border:none;"></iframe>`;
+    } else {
+        body.innerHTML = `<div class="py-5"><i class="bi bi-file-earmark display-1"></i><p class="mt-3">Предпросмотр недоступен</p></div>`;
+    }
+    
+    new bootstrap.Modal(document.getElementById('docPreviewModal')).show();
+}
+
+async function deleteDocument(id, name) {
+    if (!confirm('Удалить файл "' + name + '"?')) return;
+    try {
+        const res = await fetch(`${API_URL}/api/documents/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.error);
+            return;
+        }
+        await loadDocuments();
+    } catch(e) { alert('Ошибка удаления'); }
+}

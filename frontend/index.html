@@ -26,6 +26,7 @@
             <a class="navbar-brand" href="#"><i class="bi bi-gear-fill"></i> Система контроля v1.1.3</a>
             <div class="ms-auto d-flex align-items-center gap-2">
                 <button class="btn btn-outline-light btn-sm admin-only" id="manageUsersBtn" style="display: none;"><i class="bi bi-people"></i> Пользователи</button>
+                <button class="btn btn-outline-light btn-sm" id="manageDocsBtn"><i class="bi bi-folder2-open"></i> Документация</button>
                 <button class="btn btn-outline-light btn-sm" id="manageEquipmentBtn"><i class="bi bi-tools"></i> Оборудование</button>
                 <span class="navbar-text text-white" id="userInfo"></span>
                 <button class="btn btn-outline-light btn-sm" id="logoutBtn"><i class="bi bi-box-arrow-right"></i> Выход</button>
@@ -371,5 +372,63 @@
             </div>
         </div>
     </div>
+
+    <!-- Документация Modal -->
+    <div class="modal fade" id="documentsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-folder2-open"></i> Документация</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Загрузка файла (только админ) -->
+                    <div id="docUploadSection" style="display:none;" class="mb-3">
+                        <div class="card border-primary">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="file" class="form-control" id="docFileInput" multiple>
+                                    <button class="btn btn-primary text-nowrap" id="docUploadBtn">
+                                        <i class="bi bi-cloud-upload"></i> Загрузить
+                                    </button>
+                                </div>
+                                <div class="form-text">Максимум 50 МБ на файл. Любые форматы.</div>
+                                <div id="docUploadProgress" class="mt-2" style="display:none;">
+                                    <div class="progress">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Список файлов -->
+                    <div id="documentsList">
+                        <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Предпросмотр файла Modal -->
+    <div class="modal fade" id="docPreviewModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="docPreviewTitle">Просмотр файла</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center" id="docPreviewBody">
+                </div>
+                <div class="modal-footer">
+                    <a href="#" id="docPreviewDownload" class="btn btn-primary" download>
+                        <i class="bi bi-download"></i> Скачать
+                    </a>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

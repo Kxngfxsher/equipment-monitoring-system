@@ -15,6 +15,8 @@ app.use(cors());
 app.use(express.json());
 
 const uploadsDir = path.join(__dirname, 'uploads');
+const documentsDir = path.join(uploadsDir, 'documents');
+if (!fs.existsSync(documentsDir)) fs.mkdirSync(documentsDir, { recursive: true });
 const photosDir = path.join(__dirname, 'uploads/photos');
 const tasksDir = path.join(__dirname, 'uploads/tasks');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
@@ -77,6 +79,17 @@ function initDatabase() {
       FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime_type TEXT,
+      size INTEGER,
+      uploaded_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    )`);
+
     db.run(`CREATE TABLE IF NOT EXISTS equipment_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, equipment_id TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('working', 'faulty', 'maintenance')),
@@ -95,7 +108,7 @@ function initDatabase() {
 }
 
 function authenticateToken(req, res, next) {
-  const token = req.headers['authorization']?.split(' ')[1];
+  const token = req.headers['authorization']?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Access token required' });
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: 'Invalid token' });
@@ -459,6 +472,79 @@ app.get('/api/shifts/:id/report/v2', authenticateToken, (req, res) => {
           });
         });
     });
+});
+
+// === ДОКУМЕНТАЦИЯ ===
+const docStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, documentsDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, uniqueSuffix + ext);
+  }
+});
+const docUpload = multer({ storage: docStorage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
+
+// Список документов (все авторизованные)
+app.get('/api/documents', authenticateToken, (req, res) => {
+  db.all(`SELECT d.*, u.username as uploaded_by_name 
+    FROM documents d LEFT JOIN users u ON d.uploaded_by = u.id 
+    ORDER BY d.created_at DESC`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    res.json(rows);
+  });
+});
+
+// Загрузка файла (только админ)
+app.post('/api/documents', authenticateToken, docUpload.single('file'), (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор может загружать файлы' });
+  if (!req.file) return res.status(400).json({ error: 'Файл не выбран' });
+  
+  db.run(`INSERT INTO documents (filename, original_name, mime_type, size, uploaded_by) VALUES (?, ?, ?, ?, ?)`,
+    [req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.user.id],
+    function(err) {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      res.json({ id: this.lastID, message: 'Файл загружен', filename: req.file.filename, original_name: req.file.originalname });
+    });
+});
+
+// Скачивание/просмотр файла (все авторизованные)
+app.get('/api/documents/:id/download', authenticateToken, (req, res) => {
+  db.get('SELECT * FROM documents WHERE id = ?', [req.params.id], (err, doc) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    if (!doc) return res.status(404).json({ error: 'Файл не найден' });
+    const filePath = path.join(documentsDir, doc.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Файл не найден на диске' });
+    res.download(filePath, doc.original_name);
+  });
+});
+
+// Предпросмотр файла (все авторизованные)
+app.get('/api/documents/:id/preview', authenticateToken, (req, res) => {
+  db.get('SELECT * FROM documents WHERE id = ?', [req.params.id], (err, doc) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    if (!doc) return res.status(404).json({ error: 'Файл не найден' });
+    const filePath = path.join(documentsDir, doc.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Файл не найден на диске' });
+    res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(doc.original_name)}"`);
+    fs.createReadStream(filePath).pipe(res);
+  });
+});
+
+// Удаление документа (только админ)
+app.delete('/api/documents/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Только администратор может удалять файлы' });
+  db.get('SELECT * FROM documents WHERE id = ?', [req.params.id], (err, doc) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    if (!doc) return res.status(404).json({ error: 'Файл не найден' });
+    const filePath = path.join(documentsDir, doc.filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    db.run('DELETE FROM documents WHERE id = ?', [req.params.id], (err2) => {
+      if (err2) return res.status(500).json({ error: 'Database error' });
+      res.json({ message: 'Файл удалён' });
+    });
+  });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../frontend/login.html')));
